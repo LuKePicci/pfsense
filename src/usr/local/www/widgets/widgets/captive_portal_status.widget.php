@@ -32,21 +32,6 @@ require_once("pfsense-utils.inc");
 require_once("functions.inc");
 require_once("captiveportal.inc");
 
-$cpzone = $_GET['zone'];
-if (isset($_POST['zone'])) {
-	$cpzone = $_POST['zone'];
-}
-$cpzone = strtolower($cpzone);
-
-if (isset($cpzone) && !empty($cpzone)) {
-	$cpzoneid = config_get_path("captiveportal/{$cpzone}/zoneid");
-}
-
-if (($_GET['act'] == "del") && !empty($cpzone) && isset($cpzoneid)) {
-	captiveportal_disconnect_client($_GET['id'], 6);
-}
-unset($cpzone);
-
 flush();
 
 if (!function_exists('clientcmp')) {
@@ -83,21 +68,21 @@ foreach (config_get_path('captiveportal', []) as $cpzone => $cp) {
 		<tbody>
 	<?php foreach ($cpdb_all as $cpent): ?>
 		<tr>
-			<td><?=$cpent[2];?></td>
-			<td><?=$cpent[3];?></td>
-			<td><?=$cpent[4];?></td>
-			<td><?=date("m/d/Y H:i:s", $cpent[0]);?></td>
+			<td><?=htmlspecialchars($cpent[2]);?></td>
+			<td><?=htmlspecialchars($cpent[3]);?></td>
+			<td><?=htmlspecialchars($cpent[4]);?></td>
+			<td><?=htmlspecialchars(date("m/d/Y H:i:s", $cpent[0]));?></td>
 			<td>
 <?php
 			if ($cpent[11] && ($cpent[11] > 0)):
-				echo date("m/d/Y H:i:s", $cpent[11]);
+				echo htmlspecialchars(date("m/d/Y H:i:s", $cpent[11]));
 			else:
 				echo "&nbsp;";
 			endif;
 ?>
 			</td>
 			<td>
-				<a href="?order=<?=htmlspecialchars($_GET['order']);?>&amp;showact=<?=$showact;?>&amp;act=del&amp;zone=<?=$cpent[10];?>&amp;id=<?=$cpent[5];?>">
+				<a href="status_captiveportal.php?order=<?=urlencode($_GET['order']);?>&amp;showact=<?=urlencode($showact);?>&amp;act=del&amp;zone=<?=urlencode($cpent[10]);?>&amp;id=<?=urlencode($cpent[5]);?>" usepost>
 					<i class="fa-solid fa-trash-can" title="<?=gettext("delete");?>"></i>
 				</a>
 			</td>

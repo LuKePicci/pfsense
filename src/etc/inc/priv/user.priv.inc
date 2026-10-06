@@ -166,4 +166,14 @@ $priv_list['page-openvpn-client-advanced']['name'] = gettext("WebCfg - OpenVPN: 
 $priv_list['page-openvpn-client-advanced']['descr'] = gettext("Allow edit access to the 'OpenVPN: Servers' Advanced settings field.");
 $priv_list['page-openvpn-client-advanced']['warn'] = "standard-warning-root";
 
+$priv_list['page-services-dhcpserver-custom'] = array();
+$priv_list['page-services-dhcpserver-custom']['name'] = gettext("WebCfg - Services: DHCP Server: Edit Custom Configuration");
+$priv_list['page-services-dhcpserver-custom']['descr'] = gettext("Allow edit access to the 'Services: DHCP Server' Custom Configuration fields.");
+$priv_list['page-services-dhcpserver-custom']['warn'] = "standard-warning-root";
+
+$priv_list['page-services-dhcpv6server-custom'] = array();
+$priv_list['page-services-dhcpv6server-custom']['name'] = gettext("WebCfg - Services: DHCPv6 Server: Edit Custom Configuration");
+$priv_list['page-services-dhcpv6server-custom']['descr'] = gettext("Allow edit access to the 'Services: DHCPv6 Server' Custom Configuration fields.");
+$priv_list['page-services-dhcpv6server-custom']['warn'] = "standard-warning-root";
+
 ?>

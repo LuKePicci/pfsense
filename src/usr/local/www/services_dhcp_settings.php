@@ -49,6 +49,8 @@ if (dhcp_is_backend('isc')) {
 	exit;
 }
 
+$log_levels = array_merge(['default' => gettext('Default')], kea_log_levels());
+
 $pconfig = config_get_path('kea', []);
 
 $iflist = get_configured_interface_with_descr();
@@ -130,6 +132,21 @@ display_top_tabs($tab_array);
 $form = new Form();
 
 $section = new Form_Section(gettext('General Settings'));
+
+$group = new Form_Group('Log Levels');
+$group->add(new Form_Select(
+	'loglevel',
+	null,
+	$pconfig['loglevel'],
+	$log_levels
+))->setWidth(2)->setHelp('Service Default');
+$group->add(new Form_Select(
+	'loglevel_leases',
+	null,
+	$pconfig['loglevel_leases'],
+	$log_levels
+))->setWidth(2)->setHelp('DHCP Leases');
+$section->add($group);
 
 $section->addInput(new Form_Checkbox(
 	'dnsreg',
@@ -342,11 +359,15 @@ $section->addInput(new Form_Select(
 $form->add($section);
 
 $section = new Form_Section(gettext('Custom Configuration'));
-$section->addInput(new Form_Textarea(
+$custom_config = new Form_Textarea(
 	'custom_kea_config',
 	gettext('JSON Configuration'),
 	array_get_path($pconfig, 'custom_kea_config')
-))->setWidth(8)->setHelp(gettext('JSON to be merged into the "%1$s" section of the generated Kea DHCPv4 configuration.%2$sThe input must be a well formed JSON object and should not include the "%1$s" key itself.'), 'Dhcp4', '<br/>');
+);
+if (!dhcp_can_edit_custom_config()) {
+	$custom_config->setDisabled();
+}
+$section->addInput($custom_config)->setWidth(8)->setHelp(gettext('JSON to be merged into the "%1$s" section of the generated Kea DHCPv4 configuration.%2$sThe input must be a well formed JSON object and should not include the "%1$s" key itself.'), 'Dhcp4', '<br/>');
 $form->add($section);
 
 $form->addGlobal(new Form_Input(

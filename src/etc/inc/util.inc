@@ -227,6 +227,12 @@ define("RULE_LABEL_ORDER", [
 	RULE_LABEL_KEY_DESCRIPTION => 'RULE_LABEL_KEY_DESCRIPTION'
 ]);
 
+// Alias tags.
+define("ALIAS_TAG_DELIMITER", ',');
+// Alias display limits.
+define('ALIAS_CONTENT_DISPLAY_PAGE_MAX', 20);
+define('ALIAS_CONTENT_DISPLAY_POPUP_MAX', 20);
+
 // Log prefixes
 define('LOG_PREFIX_SYSTEM', 'System');
 define('LOG_PREFIX_UPGRADE', 'Upgrade');
@@ -271,7 +277,7 @@ define('POSIX_EPERM', 1);
  */
 function parse_rule_label_tags(string|array $tags): array {
 	if (is_string($tags)) {
-		$tags = array_filter(explode(RULE_LABEL_TAG_DELIMITER, $tags));
+		$tags = explode(RULE_LABEL_TAG_DELIMITER, $tags);
 	}
 
 	$new_tags = [];
@@ -460,6 +466,19 @@ function get_labels_string_from_rule_item(array $rule): string {
 }
 
 /**
+ * Get label tags from a config rule.
+ */
+function get_label_tags_from_rule_item(array $rule): array {
+	foreach (get_label_items_from_rule_item($rule) as $label_item) {
+		if ($label_item['name'] != RULE_LABEL_KEY_TAGS) {
+			continue;
+		}
+		return explode(RULE_LABEL_TAG_DELIMITER, $label_item['descr']);
+	}
+	return [];
+}
+
+/**
  * Get label tags from a pf rule.
  */
 function get_label_tags_from_rule_string(string $rule): array {
@@ -582,6 +601,15 @@ function set_label_tags_for_rule_string(string $rule, array $tags): string {
 		$new_rule = "{$new_rule} {$new_label}";
 	}
 	return $new_rule;
+}
+
+function is_filter_rule_managed(array $rule): bool {
+	foreach (get_label_tags_from_rule_item($rule) as $label_tag) {
+		if ($label_tag == 'automanaged') {
+			return true;
+		}
+	}
+	return false;
 }
 
 function v6_range_to_prefixlen(string $start, string $end): string|false {
@@ -1450,7 +1478,7 @@ function is_ipaddrv6_v4map($ipaddr) {
 
 /* returns true if $ipaddr is a valid dotted IPv4 address */
 function is_ipaddrv4($ipaddr) {
-	if (!is_string($ipaddr) || empty($ipaddr) || ip2long($ipaddr) === FALSE) {
+	if (!is_string($ipaddr) || empty($ipaddr) || preg_match('/\0/', $ipaddr) || ip2long($ipaddr) === FALSE) {
 		return false;
 	}
 	return true;
@@ -1570,6 +1598,54 @@ function validate_nat64_prefix(mixed $prefix):bool {
 	}
 }
 
+/**
+ * Get a list of valid alias tags.
+ *
+ * Each tag is trimmed, has a minimum length of 1, is stripped of
+ * double-quotes, and is delimited by ALIAS_TAG_DELIMITER.
+ */
+function parse_alias_tags(string|array $tags): array {
+	if (is_string($tags)) {
+		$tags = explode(ALIAS_TAG_DELIMITER, $tags);
+	}
+
+	$new_tags = [];
+	foreach ($tags as $tag) {
+		if (!is_string($tag)) {
+			continue;
+		}
+		$tag = str_replace('"', '', trim($tag));
+		if (strlen($tag) < 1) {
+			continue;
+		}
+		$new_tags[] = $tag;
+	}
+	if (!empty($new_tags)) {
+		$new_tags = array_unique($new_tags);
+	}
+
+	return $new_tags;
+}
+
+/**
+ * Get tags from a config alias.
+ */
+function get_tags_from_alias_item(array $alias): array {
+	if (!isset($alias['tags']) || !is_string($alias['tags'])) {
+		return [];
+	}
+	return parse_alias_tags($alias['tags']);
+}
+
+function is_alias_managed(array $alias): bool {
+	foreach (get_tags_from_alias_item($alias) as $tag) {
+		if ($tag == 'automanaged') {
+			return true;
+		}
+	}
+	return false;
+}
+
 function get_reserved_table_names($name = '', $type = '') {
 	global $reserved_table_names;
 
@@ -1589,7 +1665,7 @@ function get_reserved_table_names($name = '', $type = '') {
 		return $return;
 	}
 
-	// Check for give alias type(s).
+	// Check for given alias type(s).
 	foreach ($reserved_table_names as $alias_name => $alias_info) {
 		if (empty($type) || in_array($alias_info['type'], $requested_types)) {
 			$return[$alias_name] = $alias_info;
@@ -2857,9 +2933,20 @@ function exec_command($command) {
 /* wrapper for exec()
    Executes in background or foreground.
    For background execution, returns PID of background process to allow calling code control */
-function mwexec($command, $nologentry = false, $clearsigmask = false, $background = false) {
+function mwexec($command, $logprioritypref = LOG_NOTICE, $clearsigmask = false, $background = false) {
 	global $g;
 	$retval = 0;
+
+	if (is_bool($logprioritypref)) {
+		// Keep compatibility with previous function definition.
+		if ($logprioritypref && !g_get('debug')) {
+			$logprioritypref = null;
+		} else {
+			$logprioritypref = LOG_NOTICE;
+		}
+	} elseif (!is_int($logprioritypref)) {
+		$logprioritypref = LOG_NOTICE;
+	}
 
 	if (g_get('debug')) {
 		if (!$_SERVER['REMOTE_ADDR']) {
@@ -2878,8 +2965,8 @@ function mwexec($command, $nologentry = false, $clearsigmask = false, $backgroun
 		// run in foreground, and (optionally) log if nonzero return
 		$outputarray = array();
 		exec("$command 2>&1", $outputarray, $retval);
-		if (($retval <> 0) && (!$nologentry || g_get('debug'))) {
-			logger(LOG_NOTICE, localize_text("The command '%1\$s' returned exit code '%2\$d', the output was '%3\$s' ", $command, $retval, implode(" ", $outputarray)));
+		if (($retval <> 0) && isset($logprioritypref)) {
+			logger($logprioritypref, localize_text("The command '%1\$s' returned exit code '%2\$d', the output was '%3\$s' ", $command, $retval, implode(" ", $outputarray)));
 		}
 	}
 
@@ -4935,7 +5022,7 @@ function cisco_extract_index($prule) {
 	if (is_numeric($index[1])) {
 		return intval($index[1]);
 	} else {
-		logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Could not extract index", $prule));
+		logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Could not extract index", $prule));
 	}
 	return -1;;
 }
@@ -4968,7 +5055,7 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 			$tmprule .= "proto {$rule[$index]} ";
 			break;
 		default:
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid protocol", $rule_orig));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid protocol", $rule_orig));
 			return;
 	}
 	$index++;
@@ -4985,7 +5072,7 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 			}
 			$index++;
 		} else {
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid source host '%s'", $rule_orig, $rule[$index]));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid source host '%s'", $rule_orig, $rule[$index]));
 			return;
 		}
 	} elseif (is_subnetv6(trim($rule[$index])) && ($proto == "inet6")) {
@@ -5002,12 +5089,12 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 			try {
 				$netmask = cisco_to_cidr($netmask);
 			} catch(Exception $e) {
-				logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid source netmask '%s' (%s)", $rule_orig, $netmask, $e->getMessage()));
+				logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid source netmask '%s' (%s)", $rule_orig, $netmask, $e->getMessage()));
 				return;
 			}
 			$tmprule .= "from {$network}/{$netmask} ";
 		} else {
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid source network '%s'", $rule_orig, $network));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid source network '%s'", $rule_orig, $network));
 			return;
 		}
 
@@ -5035,7 +5122,7 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 		if (is_port($port)) {
 			$tmprule .= "port {$operator} {$port} ";
 		} else {
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid source port: '%s' not a numeric value between 0 and 65535.", $rule_orig, $port));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid source port: '%s' not a numeric value between 0 and 65535.", $rule_orig, $port));
 			return;
 		}
 		$index++;
@@ -5044,7 +5131,7 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 		if (is_port($port[0]) && is_port($port[1])) {
 			$tmprule .= "port {$port[0]}:{$port[1]} ";
 		} else {
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid source ports: '%s' & '%s' one or both are not a numeric value between 0 and 65535.", $rule_orig, $port[0], $port[1]));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid source ports: '%s' & '%s' one or both are not a numeric value between 0 and 65535.", $rule_orig, $port[0], $port[1]));
 			return;
 		}
 		$index++;
@@ -5058,7 +5145,7 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 			$tmprule .= "to {$rule[$index]} ";
 			$index++;
 		} else {
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid destination host '%s'.", $rule_orig, $rule[$index]));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid destination host '%s'.", $rule_orig, $rule[$index]));
 			return;
 		}
 	} elseif (is_subnetv6(trim($rule[$index])) && ($proto == "inet6")) {
@@ -5075,12 +5162,12 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 			try {
 				$netmask = cisco_to_cidr($netmask);
 			} catch(Exception $e) {
-				logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid destination netmask '%s' (%s).", $rule_orig, $netmask, $e->getMessage()));
+				logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid destination netmask '%s' (%s).", $rule_orig, $netmask, $e->getMessage()));
 				return;
 			}
 			$tmprule .= "to {$network}/{$netmask} ";
 		} else {
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid destination network '%s'.", $rule_orig, $network));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid destination network '%s'.", $rule_orig, $network));
 			return;
 		}
 
@@ -5108,7 +5195,7 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 		if (is_port($port)) {
 			$tmprule .= "port {$operator} {$port} ";
 		} else {
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid destination port: '%s' not a numeric value between 0 and 65535.", $rule_orig, $port));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid destination port: '%s' not a numeric value between 0 and 65535.", $rule_orig, $port));
 			return;
 		}
 		$index++;
@@ -5117,7 +5204,7 @@ function parse_cisco_acl_rule($rule, $devname, $dir, $proto) {
 		if (is_port($port[0]) && is_port($port[1])) {
 			$tmprule .= "port {$port[0]}:{$port[1]} ";
 		} else {
-			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s %s: Invalid destination ports: '%s' '%s' one or both are not a numeric value between 0 and 65535.", $rule_orig, $port[0], $port[1]));
+			logger(LOG_WARNING, localize_text("Error parsing RADIUS attribute - rule %s: Invalid destination ports: '%s' '%s' one or both are not a numeric value between 0 and 65535.", $rule_orig, $port[0], $port[1]));
 			return;
 		}
 		$index++;

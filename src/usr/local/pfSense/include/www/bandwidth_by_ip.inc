@@ -70,14 +70,16 @@ function printBandwidth($interface, $filter, $sort, $hostipformat, $mode) {
 	// If hostname, description or FQDN is requested then load the locally-known IP address - host/description mappings into an array keyed by IP address.
 	if ($hostipformat != "") {
 		$domain = config_get_path('system/domain');
-		foreach (array_column(config_get_path('dhcpd', []), 'staticmap') as $hostent) {
-			if (($hostent['ipaddr'] != "") && ($hostent['hostname'] != "")) {
-				if ($hostipformat == "descr" && $hostent['descr'] != "") {
-					$iplookup[$hostent['ipaddr']] = $hostent['descr'];
-				} else {
-					$iplookup[$hostent['ipaddr']] = $hostent['hostname'];
-					if ($hostipformat == "fqdn") {
-						$iplookup[$hostent['ipaddr']] .= "." . $domain;
+		foreach (array_column(config_get_path('dhcpd', []), 'staticmap') as $ifsmaps) {
+			foreach ($ifsmaps as $hostent) {
+				if (($hostent['ipaddr'] != "") && ($hostent['hostname'] != "")) {
+					if ($hostipformat == "descr" && $hostent['descr'] != "") {
+						$iplookup[$hostent['ipaddr']] = $hostent['descr'];
+					} else {
+						$iplookup[$hostent['ipaddr']] = $hostent['hostname'];
+						if ($hostipformat == "fqdn") {
+							$iplookup[$hostent['ipaddr']] .= "." . $domain;
+						}
 					}
 				}
 			}
@@ -181,7 +183,14 @@ function printBandwidth($interface, $filter, $sort, $hostipformat, $mode) {
 						$addrdata = $iplookup[$infoarray[0]];
 					} else {
 						// Try to reverse lookup the IP address.
-						$addrdata = gethostbyaddr($infoarray[0]);
+						$ptr = gethostbyaddr($infoarray[0]);
+						/* Only use the result if it is a proper name or IP address. */
+						if (is_ipaddr($ptr) ||
+						    is_domain($ptr)) {
+							$addrdata = $ptr;
+						} else {
+							$addrdata = $infoarray[0];
+						}
 						if ($addrdata != $infoarray[0]) {
 							// Reverse lookup returned something other than the IP address (FQDN, we hope!)
 							if ($hostipformat != "fqdn") {

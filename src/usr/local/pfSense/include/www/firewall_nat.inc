@@ -631,7 +631,14 @@ function saveNATrule($post, $id, $json = false) {
 		if ($need_filter_rule == true) {
 			$filter_rule_config = get_filter_rules_list();
 			/* auto-generate a matching firewall rule */
-			$filterent = array();
+			$filterent = [
+				'type' => 'pass',
+				'tracker' => (int)microtime(true),
+				'created' => make_config_revision_entry(null, gettext("NAT Port Forward"))
+			];
+			if ($natent['nosync']) {
+				$filterent['nosync'] = true;
+			}
 			unset($filterentid);
 
 			// If a rule already exists, load it
@@ -642,6 +649,9 @@ function saveNATrule($post, $id, $json = false) {
 				} else {
 					$filterent = $filter_rule_config[$filterentid];
 				}
+			} elseif ($post['filter-rule-association'] == 'add-associated') {
+				// This is a new NAT rule and hence there's no associated rule.
+				$filterent['associated-rule-id'] = $natent['associated-rule-id'] = get_unique_id();
 			}
 
 			pconfig_to_address($filterent['source'], $post['src'],
@@ -651,7 +661,9 @@ function saveNATrule($post, $id, $json = false) {
 			// Update interface, protocol and destination
 			$filterent['interface'] = $post['interface'];
 			$filterent['ipprotocol'] = $post['ipprotocol'];
-			$filterent['protocol'] = $post['proto'];
+			if (!empty($post['proto']) && (strtolower($post['proto']) != 'any')) {
+				$filterent['protocol'] = $post['proto'];
+			}
 			if (get_specialnet($post['localtype'], $rdr_lcltype_flags)) {
 				$filterent['destination']['network'] = $post['localtype'];
 				if (isset($filterent['destination']['address'])) {
@@ -682,23 +694,17 @@ function saveNATrule($post, $id, $json = false) {
 				$filterent['destination']['port'] = $dstpfrom . "-" . $dstpto;
 			}
 
-			/*
-			 * Our firewall filter description may be no longer than
-			 * 63 characters, so don't let it be.
-			 */
-			$filterent['descr'] = substr("NAT " . $post['descr'], 0, 62);
-
-			// If this is a new rule, create an ID and add the rule
-			if ($post['filter-rule-association'] == 'add-associated') {
-				$filterent['associated-rule-id'] = $natent['associated-rule-id'] = get_unique_id();
-				if ($natent['nosync']) {
-					$filterent['nosync'] = true;
-				}
-				$filterent['tracker'] = (int)microtime(true);
-				$filterent['created'] = make_config_revision_entry(null, gettext("NAT Port Forward"));
-				add_filter_rules([$filterent]);
-			} elseif ($filterentid !== false) {
+			if (isset($filterentid) && ($filterentid !== false)) {
+				// Replace the associated rule.
 				add_filter_rules([$filterent], $filterentid, true);
+			} else {
+				// Limit the description length of new rules.
+				$filterent['descr'] = substr(
+					implode(' ', array_filter(['NAT', $post['descr']])),
+					0, 62
+				);
+				// Create a new rule.
+				add_filter_rules([$filterent]);
 			}
 
 			if (!$json) {

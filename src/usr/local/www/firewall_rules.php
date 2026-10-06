@@ -126,6 +126,7 @@ function print_states($tracker_start, $tracker_end = -1) {
 }
 
 filter_rules_sort();
+$filter_rules_list = null;
 
 if ($_REQUEST['if']) {
 	$if = $_REQUEST['if'];
@@ -153,9 +154,10 @@ if ($_POST['apply']) {
 }
 
 if ($_POST['act'] == "del") {
-	$rule = is_numericint($_POST['id']) ? config_get_path("filter/rule/{$_POST['id']}") : null;
-	if (isset($rule)) {
+	$filter_rules_list ??= get_filter_rules_list();
+	if (is_numericint($_POST['id']) && isset($filter_rules_list[$_POST['id']]) && !is_filter_rule_managed($filter_rules_list[$_POST['id']])) {
 		remove_filter_rules($_POST['id'], $if);
+		unset($filter_rules_list);
 
 		if (write_config(gettext("Firewall: Rules - deleted a firewall rule."))) {
 			mark_subsystem_dirty('filter');
@@ -180,41 +182,62 @@ if ($_REQUEST['savemsg']) {
 }
 
 if (isset($_POST['del_x'])) {
+	$filter_rules_list ??= get_filter_rules_list();
 	if (is_array($_POST['rule']) && count($_POST['rule'])) {
-		$changes = [];
-		remove_filter_rules($_POST['rule'], $if, true, $changes);
-		if (isset($changes['filter_rules']) && write_config(gettext("Firewall: Rules - deleted selected firewall rules."))) {
-			mark_subsystem_dirty('filter');
+		$_POST['rule'] = array_filter($_POST['rule'], function ($i) use ($filter_rules_list) {
+			return !is_filter_rule_managed($filter_rules_list[$i]);
+		});
+		if (!empty($_POST['rule'])) {
+			$changes = [];
+			remove_filter_rules($_POST['rule'], $if, true, $changes);
+			unset($filter_rules_list);
+			if (isset($changes['filter_rules']) && write_config(gettext("Firewall: Rules - deleted selected firewall rules."))) {
+				mark_subsystem_dirty('filter');
+			}
 		}
 
 		header("Location: firewall_rules.php?if=" . htmlspecialchars($if));
 		exit;
 	}
 } elseif (isset($_POST['toggle_x'])) {
+	$filter_rules_list ??= get_filter_rules_list();
 	if (is_array($_POST['rule']) && count($_POST['rule'])) {
-		foreach ($_POST['rule'] as $rulei) {
-			if (config_path_enabled("filter/rule/{$rulei}", 'disabled')) {
-				config_del_path("filter/rule/{$rulei}/disabled");
-			} else {
-				config_set_path("filter/rule/{$rulei}/disabled", true);
+		$_POST['rule'] = array_filter($_POST['rule'], function ($i) use ($filter_rules_list) {
+			return !is_filter_rule_managed($filter_rules_list[$i]);
+		});
+		if (!empty($_POST['rule'])) {
+			foreach ($_POST['rule'] as $rulei) {
+				if (array_path_enabled($filter_rules_list, "{$rulei}", 'disabled')) {
+					array_del_path($filter_rules_list, "{$rulei}/disabled");
+					$wc_msg = gettext('Firewall: Rules - enabled a firewall rule.');
+				} else {
+					array_set_path($filter_rules_list, "{$rulei}/disabled", true);
+					$wc_msg = gettext('Firewall: Rules - disabled a firewall rule.');
+				}
 			}
-		}
-		if (write_config(gettext("Firewall: Rules - toggle selected firewall rules."))) {
-			mark_subsystem_dirty('filter');
+			set_filter_rules_list($filter_rules_list);
+			unset($filter_rules_list);
+			if (write_config(gettext("Firewall: Rules - toggle selected firewall rules."))) {
+				mark_subsystem_dirty('filter');
+			}
 		}
 
 		header("Location: firewall_rules.php?if=" . htmlspecialchars($if));
 		exit;
 	}
 } else if ($_POST['act'] == "toggle") {
-	if (config_get_path("filter/rule/{$_POST['id']}")) {
-		if (config_path_enabled("filter/rule/{$_POST['id']}", 'disabled')) {
-			config_del_path("filter/rule/{$_POST['id']}/disabled");
+	$filter_rules_list ??= get_filter_rules_list();
+	if (is_numericint($_POST['id']) && isset($filter_rules_list[$_POST['id']]) &&
+	    !is_filter_rule_managed($filter_rules_list[$_POST['id']])) {
+		if (array_path_enabled($filter_rules_list, "{$_POST['id']}", 'disabled')) {
+			array_del_path($filter_rules_list, "{$_POST['id']}/disabled");
 			$wc_msg = gettext('Firewall: Rules - enabled a firewall rule.');
 		} else {
-			config_set_path("filter/rule/{$_POST['id']}/disabled", true);
+			array_set_path($filter_rules_list, "{$_POST['id']}/disabled", true);
 			$wc_msg = gettext('Firewall: Rules - disabled a firewall rule.');
 		}
+		set_filter_rules_list($filter_rules_list);
+		unset($filter_rules_list);
 		if (write_config($wc_msg)) {
 			mark_subsystem_dirty('filter');
 		}
@@ -264,6 +287,10 @@ if (isset($_POST['del_x'])) {
 } elseif (isset($_POST['dstif']) && !empty($_POST['dstif']) &&
     isset($iflist[$_POST['dstif']]) && have_ruleint_access($_POST['dstif']) &&
     is_array($_POST['rule']) && count($_POST['rule'])) {
+	$filter_rules_list ??= get_filter_rules_list();
+	$_POST['rule'] = array_filter($_POST['rule'], function ($i) use ($filter_rules_list) {
+		return !is_filter_rule_managed($filter_rules_list[$i]);
+	});
 	$confiflist = get_configured_interface_list();
 	/* Use this as a starting point and increase as we go, otherwise if the
 	 * loop runs fast there can be duplicates.
@@ -271,7 +298,7 @@ if (isset($_POST['del_x'])) {
 	$tracker = (int)microtime(true);
 	$new_rules = [];
 	foreach ($_POST['rule'] as $rulei) {
-		$filterent = config_get_path("filter/rule/{$rulei}");
+		$filterent = $filter_rules_list[$rulei];
 		$filterent['tracker'] = $tracker++;
 		$filterent['interface'] = $_POST['dstif'];
 		if (($_POST['convertif'] == 'true') && ($if != $_POST['dstif']) &&
@@ -295,9 +322,13 @@ if (isset($_POST['del_x'])) {
 		}
 		$new_rules[] = $filterent;
 	}
-	add_filter_rules([$new_rules]);
-	if (write_config(gettext("Firewall: Rules - copying selected firewall rules."))) {
-		mark_subsystem_dirty('filter');
+	if (!empty($new_rules)) {
+		$changes = [];
+		add_filter_rules($new_rules, -2, false, $changes);
+		unset($filter_rules_list);
+		if (isset($changes['filter_rules']) && write_config(gettext("Firewall: Rules - copying selected firewall rules."))) {
+			mark_subsystem_dirty('filter');
+		}
 	}
 
 	header("Location: firewall_rules.php?if=" . htmlspecialchars($_POST['dstif']));
@@ -498,21 +529,32 @@ $system_aliases_ports = get_reserved_table_names('', 'port,url_ports,urltable_po
 $system_aliases_hosts = get_reserved_table_names('', 'host,network,url,urltable');
 $a_schedules = config_get_path('schedules/schedule');
 $if_config = config_get_path('interfaces', []);
-foreach (get_filter_rules_list() as $filteri => $filterent):
+$filter_rules_list ??= get_filter_rules_list();
+foreach ($filter_rules_list as $filteri => $filterent):
 
 	if (($filterent['interface'] == $if && !isset($filterent['floating'])) ||
 	    (isset($filterent['floating']) && $if === 'FloatingRules')) {
+
+		// Check if this rule is user-editable.
+		$rule_is_managed = is_filter_rule_managed($filterent);
 
 		// Display separator(s) for section beginning at rule n
 		if ($seprows[$nrules]) {
 			display_separator($separators, $nrules, $columns_in_table);
 		}
 ?>
+		<?php if ($rule_is_managed): ?>
+					<tr id="fr<?=$nrules;?>" <?=(isset($filterent['disabled']) ? ' class="disabled"' : '')?> style="cursor: default;">
+						<td>
+							<input type="checkbox" id="frc<?=$nrules;?>" name="rule[]" value="<?=$filteri;?>" style="pointer-events: none;"/>
+						</td>
+		<?php else: ?>
 					<tr id="fr<?=$nrules;?>" onClick="fr_toggle(<?=$nrules;?>)" ondblclick="document.location='firewall_rules_edit.php?id=<?=$filteri;?>';" <?=(isset($filterent['disabled']) ? ' class="disabled"' : '')?>>
 						<td>
 							<input type="checkbox" id="frc<?=$nrules;?>" onClick="fr_toggle(<?=$nrules;?>)" name="rule[]" value="<?=$filteri;?>"/>
 						</td>
 
+		<?php endif; ?>
 	<?php
 		if ($filterent['type'] == "block") {
 			$iconfn = "fa-solid fa-times text-danger";
@@ -529,29 +571,35 @@ foreach (get_filter_rules_list() as $filteri => $filterent):
 		}
 	?>
 						<td title="<?=$title_text?>">
+		<?php if ($rule_is_managed): ?>
+							<a>
+								<i class="<?=$iconfn?>" title="<?=gettext("enabled/disabled status");?>"></i>
+							</a>
+		<?php else: ?>
 							<a href="?if=<?=htmlspecialchars($if);?>&amp;act=toggle&amp;id=<?=$filteri;?>" usepost>
 								<i class="<?=$iconfn?>" title="<?=gettext("click to toggle enabled/disabled status");?>"></i>
 							</a>
+		<?php endif; ?>
 	<?php
 		if ($filterent['quick'] == 'yes') {
-			print '<i class="fa-solid fa-forward text-success" title="'. gettext("&quot;Quick&quot; rule. Applied immediately on match.") .'" style="cursor: pointer;"></i>';
+			print '<i class="fa-solid fa-forward text-success" title="'. gettext("&quot;Quick&quot; rule. Applied immediately on match.") . '"></i>';
 		}
 
 		$isadvset = firewall_check_for_advanced_options($filterent);
 		if ($isadvset) {
-			print '<i class="fa-solid fa-cog" title="'. gettext("advanced setting") .': '. $isadvset .'" style="cursor: pointer;"></i>';
+			print '<i class="fa-solid fa-cog" title="'. gettext("advanced setting") .': '. $isadvset . '"></i>';
 		}
 
 		if (isset($filterent['log'])) {
-			print '<i class="fa-solid fa-tasks" title="'. gettext("traffic is logged") .'" style="cursor: pointer;"></i>';
+			print '<i class="fa-solid fa-tasks" title="'. gettext("traffic is logged") . '"></i>';
 		}
 
 		if (isset($filterent['direction']) &&
 		    ($if == "FloatingRules")) {
 			if ($filterent['direction'] == 'in') {
-				print '<i class="fa-regular fa-circle-left" title="'. gettext("direction is in") .'" style="cursor: pointer;"></i>';
+				print '<i class="fa-regular fa-circle-left" title="'. gettext("direction is in") . '"></i>';
 			} elseif ($filterent['direction'] == 'out') {
-				print '<i class="fa-regular fa-circle-right" title="'. gettext("direction is out") .'" style="cursor: pointer;"></i>';
+				print '<i class="fa-regular fa-circle-right" title="'. gettext("direction is out") . '"></i>';
 			}
 		}
 	?>
@@ -567,7 +615,6 @@ foreach (get_filter_rules_list() as $filteri => $filterent):
 		//build Schedule popup box
 		$schedule_span_begin = "";
 		$schedule_span_end = "";
-		$sched_caption_escaped = "";
 		$sched_content = "";
 		$schedstatus = false;
 		$dayArray = array (gettext('Mon'), gettext('Tues'), gettext('Wed'), gettext('Thur'), gettext('Fri'), gettext('Sat'), gettext('Sun'));
@@ -668,10 +715,9 @@ foreach (get_filter_rules_list() as $filteri => $filterent):
 							$sched_content .= $dayFriendly . "; " . $timeFriendly . "<br />";
 						}
 					}
-					#FIXME
-					$sched_caption_escaped = str_replace("'", "\'", $schedule['descr']);
-					$schedule_span_begin = '<a href="/firewall_schedule_edit.php?id=' . $idx . '" data-toggle="popover" data-trigger="hover focus" title="' . $schedule['name'] . '" data-content="' .
-						$sched_caption_escaped . '" data-html="true">';
+
+					$schedule_span_begin = '<a href="/firewall_schedule_edit.php?id=' . $idx . '" data-toggle="popover" data-trigger="hover focus" title="' . htmlspecialchars($schedule['name']) . '" data-content="' .
+						htmlspecialchars($schedule['descr']) . '" data-html="true">';
 					$schedule_span_end = "</a>";
 				}
 				$idx++;
@@ -708,7 +754,11 @@ foreach (get_filter_rules_list() as $filteri => $filterent):
 	<?php
 		if ($if === 'FloatingRules') {
 	?>
+		<?php if ($rule_is_managed): ?>
+			<td id="frd<?=$nrules;?>">
+		<?php else: ?>
 			<td onclick="fr_toggle(<?=$nrules;?>)" id="frd<?=$nrules;?>" ondblclick="document.location='firewall_rules_edit.php?id=<?=$i;?>';">
+		<?php endif; ?>
 	<?php
 			if (isset($filterent['interface'])) {
 				$selected_interfaces = explode(',', $filterent['interface']);
@@ -921,6 +971,7 @@ foreach (get_filter_rules_list() as $filteri => $filterent):
 							<?=htmlspecialchars($filterent['descr']);?>
 						</td>
 						<td class="action-icons">
+						<?php if (!$rule_is_managed): ?>
 						<!-- <?=(isset($filterent['disabled']) ? 'enable' : 'disable')?> -->
 							<a	class="fa-solid fa-anchor icon-pointer" id="Xmove_<?=$filteri?>" title="<?=$XmoveTitle?>"></a>
 							<a href="firewall_rules_edit.php?id=<?=$filteri;?>" class="fa-solid fa-pencil" title="<?=gettext('Edit')?>"></a>
@@ -934,6 +985,9 @@ foreach (get_filter_rules_list() as $filteri => $filterent):
 <?php }
 ?>
 							<a href="?act=del&amp;if=<?=htmlspecialchars($if);?>&amp;id=<?=$filteri;?>" class="fa-solid fa-trash-can" title="<?=gettext('Delete this rule')?>" usepost></a>
+						<?php else: ?>
+							<i class="fa-solid fa-lock text-danger" title="<?=gettext('This rule is automatically managed')?>"></i>
+						<?php endif; ?>
 <?php if (($filterent['type'] == 'pass') &&
 	    !empty($filterent['tracker'])): ?>
 							<a href="?act=killid&amp;if=<?=htmlspecialchars($if);?>&amp;id=<?=$filteri;?>&amp;tracker=<?=$filterent['tracker']?>" class="fa-solid fa-times do-confirm" title="<?=gettext('Kill states on this interface created by this rule')?>" usepost></a>
@@ -961,12 +1015,11 @@ foreach ($seprows as $idx => $sep) {
 	<div class="alert alert-warning" role="alert">
 		<p>
 		<?php if ($if === 'FloatingRules'): ?>
-			<?=gettext('No floating rules are currently defined.');?>
+			<?=gettext('No floating rules are configured.');?>
 		<?php else: ?>
-			<?=gettext("No rules are currently defined for this interface");?><br />
-			<?=gettext("All incoming connections on this interface will be blocked until pass rules are added.");?>
+			<?=gettext("No rules are configured for this interface.");?><br />
+			<?=gettext("Add a pass rule to allow traffic on this interface.");?>
 		<?php endif;?>
-			<?=gettext("Click the button to add a new rule.");?>
 		</p>
 	</div>
 <?php endif;?>

@@ -474,7 +474,6 @@ if ($_POST['save'] == gettext("Save")) {
 					$altname_str = implode(",", $altnames_tmp);
 				}
 				$n509 = csr_sign($csr, $ca, $pconfig['csrsign_lifetime'], $pconfig['type'], $altname_str, $pconfig['csrsign_digest_alg']);
-				config_set_path("ca/{$ca_item_config['idx']}", $ca);
 				if ($n509) {
 					// Gather the details required to save the new cert
 					$newcert = array();
@@ -489,9 +488,17 @@ if ($_POST['save'] == gettext("Save")) {
 						$newcert['prv'] = $csrid['prv'];
 					}
 					// Add it to the config file
+					config_set_path("ca/{$ca_item_config['idx']}", $ca);
 					config_set_path('cert/', $newcert);
 					$savemsg = sprintf(gettext("Signed certificate %s"), htmlspecialchars($newcert['descr']));
 					unset($act);
+				} else {
+					$input_errors = [gettext("Failed to sign CSR")];
+					while ($ssl_err = openssl_error_string()) {
+						if (strpos($ssl_err, 'NCONF_get_string:no value') === false) {
+							$input_errors[] = sprintf(gettext("OpenSSL Library Error: %s"), $ssl_err);
+						}
+					}
 				}
 				unset($cert);
 				break;

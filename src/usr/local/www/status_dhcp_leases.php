@@ -81,8 +81,11 @@ if (($_POST['deleteip']) && (is_ipaddr($_POST['deleteip']))) {
 endif; /* dhcp_is_backend('isc') */
 
 if (dhcp_is_backend('kea')):
-if (($_POST['deleteip']) && (is_ipaddr($_POST['deleteip']))) {
-	system_del_kea4lease($_POST['deleteip']);
+if ($_POST['deleteip']) {
+	$_POST['deleteip'] = trim($_POST['deleteip']);
+	if (is_ipaddrv4($_POST['deleteip'])) {
+		system_del_kea4lease($_POST['deleteip']);
+	}
 }
 endif; /* dhcp_is_backend('kea') */
 

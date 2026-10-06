@@ -845,6 +845,7 @@ function filter_delete_states_for_down_gateways() {
 		if (isset($last_gw)) {
 			/* If $last_gw is found then it's assumed the gateway is down. */
 			$gwip = $last_gw;
+			$what_to_kill = (is_ipaddr($gateway['gateway'])) ? gettext("down gateway") : gettext("dynamic down gateway");
 		} elseif (!is_gateway_online($gateway)) {
 			if (is_ipaddr($gateway['gateway'])) {
 				$gwip = $gateway['gateway'];
@@ -1204,6 +1205,11 @@ function reload_filter() {
 			} elseif (file_exists("{$g['cf_conf_path']}/rules.debug.old")) {
 				$_grbg = exec("/sbin/pfctl -o basic -f {$g['cf_conf_path']}/rules.debug.old 2>&1");
 			}
+
+			/* Save the bad ruleset */
+			@copy("{$g['tmp_path']}/rules.debug",
+			    "{$g['cf_conf_path']}/rules.debug.bad");
+
 			if ($line_error and $line_number) {
 				file_notice("filter_load", sprintf(gettext('There were error(s) loading the rules%3$s: %1$s - %2$s'), $saved_line_error, $line_error, (empty($rules_result) ? '' : ' (' . strval($rules_result) . ')')), "Filter Reload", "");
 				update_filter_reload_status(sprintf(gettext('There were error(s) loading the rules%3$s: %1$s - %2$s'), $saved_line_error, $line_error, (empty($rules_result) ? '' : ' (' . strval($rules_result) . ')')));
@@ -1742,19 +1748,17 @@ function filter_generate_gateways() {
 			}
 		}
 
+		$route = '';
 		$gwip = lookup_gateway_ip_by_name($gwname);
-		if (!is_ipaddr($gwip)) {
-			if ($skip_rules_gw_down) {
-				unset($GatewaysList[$gwname]);
-				continue;
+		if (is_ipaddr($gwip)) {
+			if (!is_gateway_action_enabled($gateway) || is_gateway_online($gateway)) {
+				$route = "route-to ( {$gateway['interface']} {$gwip} )";
 			}
+		} elseif ($skip_rules_gw_down) {
+			unset($GatewaysList[$gwname]);
+			continue;
 		}
 
-		if (!is_gateway_action_enabled($gateway) || is_gateway_online($gateway)) {
-			$route = "route-to ( {$gateway['interface']} {$gwip} )";
-		} else {
-			$route = '';
-		}
 		$rules .= "GW{$gwname} = \" {$route} \"\n";
 	}
 
@@ -2109,7 +2113,7 @@ function filter_get_vpns_list() {
 
 	/* openvpn */
 	foreach (['client', 'server'] as $type) {
-		$ovpncfg = config_get_path("openvpn/{$type}");
+		$ovpncfg = config_get_path("openvpn/openvpn-{$type}");
 		if (is_array($ovpncfg)) {
 			foreach ($ovpncfg as $settings) {
 				if (is_array($settings)) {
@@ -6389,7 +6393,7 @@ function delete_nat_association(array $associations_to_remove = [], array &$chan
  */
 function add_filter_rules(array $rules_list, int $index = -2, bool $replace = false, array &$changes = []) {
 	$index = get_filter_rule_relative_index($index);
-	if (!isset($index)) {
+	if (!isset($index) || empty($rules_list)) {
 		return;
 	}
 	$rules_map = get_filter_rules_map();

@@ -289,7 +289,7 @@ if (!empty($cpzone)): ?>
 		endif;
 ?>
 					<td>
-						<a href="?zone=<?=htmlspecialchars($cpzone)?>&amp;showact=<?=htmlspecialchars($_REQUEST['showact'])?>&amp;act=del&amp;id=<?=htmlspecialchars($cpent[5])?>" usepost><i class="fa-solid fa-trash-can" title="<?=gettext("Disconnect this User")?>"></i></a>
+						<a href="?zone=<?=urlencode($cpzone)?>&amp;showact=<?=urlencode($_REQUEST['showact'])?>&amp;act=del&amp;id=<?=urlencode($cpent[5])?>" usepost><i class="fa-solid fa-trash-can" title="<?=gettext("Disconnect this User")?>"></i></a>
 					</td>
 				</tr>
 <?php

@@ -412,6 +412,11 @@ function step10_submitphpaction() {
 			!strstr($_POST['tlssharedkey'], "-----END OpenVPN Static key V1-----"))
 			$input_errors[] = "The field 'TLS Authentication Key' does not appear to be valid";
 
+	if (!empty($_POST['defaultdomain']) &&
+		!is_hostname($_POST['defaultdomain'])) {
+		$input_errors[] = "DNS Default Domain must contain a valid DNS host or domain name";
+	}
+
 	if (!empty($_POST['dnsserver1']) && !is_ipaddr(trim($_POST['dnsserver1'])))
 		$input_errors[] = "The field 'DNS Server #1' must contain a valid IP address";
 	if (!empty($_POST['dnsserver2']) && !is_ipaddr(trim($_POST['dnsserver2'])))
@@ -426,6 +431,11 @@ function step10_submitphpaction() {
 	if (!empty($_POST['ntpserver2']) && !is_ipaddr(trim($_POST['ntpserver2'])))
 		$input_errors[] = "The field 'NTP Server #2' must contain a valid IP address";
 
+	if (!empty($_POST['nbtscope']) &&
+		!is_hostname($_POST['nbtscope'])) {
+		$input_errors[] = "NetBIOS Scope ID must contain a valid DNS host or domain name";
+	}
+
 	if (!empty($_POST['winsserver1']) && !is_ipaddr(trim($_POST['winsserver1'])))
 		$input_errors[] = "The field 'WINS Server #1' must contain a valid IP address";
 	if (!empty($_POST['winsserver2']) && !is_ipaddr(trim($_POST['winsserver2'])))
@@ -433,13 +443,12 @@ function step10_submitphpaction() {
 
 	if ($_POST['concurrentcon'] && !is_numeric($_POST['concurrentcon']))
 		$input_errors[] = "The field 'Concurrent connections' must be numeric.";
-	
+
 	if ($_POST['connuserlimit'] && !is_numeric($_POST['connuserlimit']))
 		$input_errors[] = "The field 'Duplicate Connection Limit' must be numeric.";
 
 	if (empty($_POST['tunnelnet']))
 		$input_errors[] = "A 'Tunnel network' must be specified.";
-
 
 	if (count($input_errors) > 0) {
 		$savemsg = $input_errors[0];

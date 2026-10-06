@@ -83,7 +83,7 @@ foreach ($dirs as $dir):
 	<tr>
 		<td></td>
 		<td class="fbDir vexpl text-left" id="<?=htmlspecialchars($realDir);?>">
-			<div onClick="$('#fbTarget').val('<?=htmlspecialchars($realDir)?>'); fbBrowse('<?=htmlspecialchars($realDir)?>');">
+			<div onClick="$('#fbTarget').val(<?=json_encode(htmlspecialchars($realDir))?>); fbBrowse(<?=json_encode(htmlspecialchars($realDir))?>);">
 				<img src="/vendor/filebrowser/images/folder_generic.gif" />
 				&nbsp;<?=htmlspecialchars($dir);?>
 			</div>

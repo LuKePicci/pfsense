@@ -305,12 +305,13 @@ function updateBandwidth() {
 				for (var y=0; y<10; y++) {
 					if ((y < hosts_split.length) && (hosts_split[y] != "") && (hosts_split[y] != "no info")) {
 						hostinfo = hosts_split[y].split(";");
-
-						$('#top10-hosts').append('<tr>'+
-							'<td>'+ hostinfo[0] +'</td>'+
-							'<td>'+ hostinfo[1] +' <?=gettext("Bits/sec");?></td>'+
-							'<td>'+ hostinfo[2] +' <?=gettext("Bits/sec");?></td>'+
-						'</tr>');
+						$('#top10-hosts').append(
+							$('<tr>').append(
+								$('<td>').text(hostinfo[0]),
+								$('<td>').text(hostinfo[1] + ' ' + <?=json_encode(htmlspecialchars(gettext("Bits/sec")));?>),
+								$('<td>').text(hostinfo[2] + ' ' + <?=json_encode(htmlspecialchars(gettext("Bits/sec")));?>)
+							)
+						);
 					}
 				}
 			},

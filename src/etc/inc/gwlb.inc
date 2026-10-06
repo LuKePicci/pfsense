@@ -163,7 +163,7 @@ function refresh_gateways(): void {
  * 	- true (default): Use cache automatically.
  *  - false: refetch gateway information.
  *  - array: the result of return_gateways_status(true).
- * @return array<array|array{status: null|int, config: null|array}>
+ * @return array{int,array{status: null|int, config: null|array}}
  */
 function get_gateway_status(mixed $gateway, array|bool $cache = true): array {
 	$gateway_details = [
@@ -535,6 +535,49 @@ function start_dpinger($gateway) {
 	return mwexec("/usr/local/bin/dpinger {$params} {$gateway['monitor']} >/dev/null");
 }
 
+/**
+ * Prepares a gateway for use with start_dpinger().
+ * @param array $gateway Item from get_gateways().
+ * @return bool True if the gateway is prepared.
+ */
+function set_dpinger_gateway_array(array &$gateway) {
+	if (!isset($gateway['ipprotocol']) || !isset($gateway['interface'])) {
+		return false;
+	}
+
+	$dpinger_bind_address = null;
+	if ($gateway['ipprotocol'] == "inet") {
+		$dpinger_bind_address = find_interface_ip($gateway['interface'], true);
+		if ($dpinger_bind_address == '0.0.0.0') {
+			// The gateway is still waiting for DHCP.
+			$dpinger_bind_address = null;
+		}
+	} elseif ($gateway['ipprotocol'] == "inet6") {
+		if (is_linklocal($gateway['gateway']) &&
+		    get_ll_scope($gateway['gateway']) == '') {
+			$gateway['gateway'] .= '%' . $gateway['interface'];
+		}
+		if (isset($gateway['monitor']) && is_linklocal($gateway['monitor'])) {
+			if (get_ll_scope($gateway['monitor']) == '') {
+				$gateway['monitor'] .= '%' . $gateway['interface'];
+			}
+			$dpinger_bind_address = find_interface_ipv6_ll($gateway['interface'], true);
+			if (get_ll_scope($dpinger_bind_address) == '') {
+				$dpinger_bind_address .= '%' . $gateway['interface'];
+			}
+		} else {
+			$dpinger_bind_address = find_interface_ipv6($gateway['interface'], true);
+		}
+	}
+	if (!is_ipaddr($dpinger_bind_address)) {
+		return false;
+	}
+
+	$gateway['enable_dpinger'] = true;
+	$gateway['gwifip'] = $dpinger_bind_address;
+	return true;
+}
+
 /*
  * Starts dpinger processes and adds appropriate static routes for monitor IPs
  */
@@ -566,8 +609,14 @@ function setup_gateways_monitor() {
 		}
 
 		/* if the monitor address is already used before, skip */
-		if (in_array($gateway['monitor'], $monitor_ips)) {
-			continue;
+		if ($monitor_ip_gw = array_search($gateway['monitor'], $monitor_ips)) {
+			if (isset($gateway['isdefaultgw'])) {
+				// The configured default gateway takes precedence over
+				// other gateways with the same monitor address.
+				unset($gateways_arr[$monitor_ip_gw]['enable_dpinger']);
+			} else {
+				continue;
+			}
 		}
 
 		/* Interface ip is needed since dpinger will bind a socket to it.
@@ -577,16 +626,10 @@ function setup_gateways_monitor() {
 		 * further checks (that can cope with the "dynamic" case) are present inside
 		 * the if block. So using $gateway['ipprotocol'] is the better option.
 		 */
-		if ($gateway['ipprotocol'] == "inet") { // This is an IPv4 gateway...
-			$gwifip = find_interface_ip($gateway['interface'], true);
-			if (!is_ipaddrv4($gwifip)) {
-				continue; //Skip this target
-			}
-
-			if ($gwifip == "0.0.0.0") {
-				continue; //Skip this target - the gateway is still waiting for DHCP
-			}
-
+		if (!set_dpinger_gateway_array($gateways_arr[$gwname])) {
+			continue;
+		}
+		if ($gateway['ipprotocol'] == "inet") {
 			/*
 			 * If the gateway is the same as the monitor we do not add a
 			 * route as this will break the routing table.
@@ -603,37 +646,13 @@ function setup_gateways_monitor() {
 					route_add_or_change($gateway['monitor'], $gateway['gateway']);
 				}
 			}
-		} else if ($gateway['ipprotocol'] == "inet6") { // This is an IPv6 gateway...
-			if (is_linklocal($gateway['gateway']) &&
-			    get_ll_scope($gateway['gateway']) == '') {
-				$gateway['gateway'] .= '%' . $gateway['interface'];
-			}
-
-			if (is_linklocal($gateway['monitor'])) {
-				if (get_ll_scope($gateway['monitor']) == '') {
-					$gateways_arr[$gwname]['monitor'] .= '%' . $gateway['interface'];
-				}
-
-				$gwifip = find_interface_ipv6_ll($gateway['interface'], true);
-
-				if (get_ll_scope($gwifip) == '') {
-					$gwifip .= '%' . $gateway['interface'];
-				}
-			} else {
-				$gwifip = find_interface_ipv6($gateway['interface'], true);
-			}
-
-			if (!is_ipaddrv6($gwifip)) {
-				continue; //Skip this target
-			}
-
+		} else {
 			/*
 			 * If the gateway is the same as the monitor we do not add a
 			 * route as this will break the routing table.
 			 * Add static routes for each gateway with their monitor IP
 			 * not strictly necessary but is a added level of protection.
 			 */
-
 			if (!$skip_static_route && !isset($gateway['dpinger_dont_add_static_route']) && ($gateway['gateway'] != $gateways_arr[$gwname]['monitor']) && is_ipaddrv6($gateway['gateway'])) {
 				if (interface_isppp_type($gateway['friendlyiface'])) {
 					logger(LOG_INFO, localize_text('Removing static route for monitor %1$s and adding a new route through %2$s', $gateway['monitor'], $gateway['interface']), LOG_PREFIX_GWMON);
@@ -644,13 +663,8 @@ function setup_gateways_monitor() {
 					route_add_or_change($gateway['monitor'], $gateway['gateway']);
 				}
 			}
-		} else {
-			continue;
 		}
-
-		$monitor_ips[] = $gateway['monitor'];
-		$gateways_arr[$gwname]['enable_dpinger'] = true;
-		$gateways_arr[$gwname]['gwifip'] = $gwifip;
+		$monitor_ips[$gateway['name']] = $gateway['monitor'];
 	}
 
 	stop_dpinger();
@@ -792,13 +806,8 @@ function remove_failover_states(?string $gateway_name = null): void {
 				continue;
 			}
 
-			if (!isset($gateways_states)) {
-				// get a list of all relevant gateway states
-				$gateways_states = return_gateways_status(true);
-			}
-
 			// only process online gateways
-			if ($gateways_states[$gateway_item[0]]['status'] != 'online') {
+			if (!is_online_gateway_status(get_gateway_status($gateway_item[0])[0])) {
 				continue;
 			}
 
@@ -847,6 +856,7 @@ function remove_failover_states(?string $gateway_name = null): void {
 	}
 	foreach ($default_gateways as $gateway_name => $gateway_interfaces) {
 		if (empty($gateway_interfaces)) {
+			// not a gateway group
 			continue;
 		}
 
@@ -868,7 +878,10 @@ function remove_failover_states(?string $gateway_name = null): void {
 		}
 		foreach (array_keys($gateway_interfaces) as $gateway_interface) {
 			mwexec_bg('/sbin/pfctl -M -i ' . escapeshellarg($gateway_interface) . " {$host_prefix} -q");
-			logger(LOG_NOTICE, localize_text("killed {$log_message} states for the lower-priority gateway {$gateway_name} ({$gateway_interface})"), LOG_PREFIX_GWMON);
+			logger(LOG_NOTICE, localize_text(
+				"killed %s states for gateways with interface %s due to gateway recovery for %s",
+				$log_message, $gateway_interface, $gateway_name
+			), LOG_PREFIX_GWMON);
 		}
 	}
 }
@@ -1623,6 +1636,116 @@ function return_gateways_array($disabled = false, $localhost = false, $inactive 
 	// Add the tier names here so that system_gateways.php doesn't need to
 	foreach ($gways as $idx => $gway) {
 		$gways[$idx]['tiername'] = gateway_getgwtiername($gways, $idx);
+	}
+
+	// At this point it's possible multiple gateways have been marked as
+	// default, e.g. if the gateways share the same IP address. This can
+	// happen when there exists both a dynamic (DHCP) and static gateway
+	// for the same interface. It can also happen in some multi-WAN
+	// scenarios, e.g. with multi-WAN PPPoE from the same ISP.
+	$defaultgw4 = config_get_path('gateways/defaultgw4', "");
+	$defaultgw6 = config_get_path('gateways/defaultgw6', "");
+	$default_gateways4 = [];
+	$default_gateways6 = [];
+	$primary_default_gw4 = null;
+	$primary_default_gw6 = null;
+	// Collect default gateways.
+	foreach ($gways as &$gw) {
+		if (!isset($gw['isdefaultgw'])) {
+			continue;
+		}
+		if ($gw['ipprotocol'] == 'inet') {
+			$default_gateways4[$gw['name']] = &$gw;
+		} else {
+			$default_gateways6[$gw['name']] = &$gw;
+		}
+	}
+	// Use the configured default gateway as the primary gateway.
+	$check_gw4 = $check_gwg4 = ((count($default_gateways4) > 1) && ($defaultgw4 != '') && ($defaultgw4 != '-'));
+	$check_gw6 = $check_gwg6 = ((count($default_gateways6) > 1) && ($defaultgw6 != '') && ($defaultgw6 != '-'));
+	if ($check_gw4 && isset($default_gateways4[$defaultgw4])) {
+		$check_gwg4 = false;
+		foreach ($default_gateways4 as &$gw) {
+			if ($gw['name'] == $defaultgw4) {
+				$primary_default_gw4 = &$gw;
+				break;
+			}
+		}
+	}
+	if ($check_gw6 && isset($default_gateways6[$defaultgw6])) {
+		$check_gwg6 = false;
+		foreach ($default_gateways6 as &$gw) {
+			if ($gw['name'] == $defaultgw6) {
+				$primary_default_gw6 = &$gw;
+				break;
+			}
+		}
+	}
+	// Check if any of the default gateways are in the default gateway group.
+	if ($check_gwg4 || $check_gwg6) {
+		foreach (config_get_path('gateways/gateway_group', []) as $group) {
+			if (($group['name'] != $defaultgw4) &&
+			    ($group['name'] != $defaultgw6)) {
+				// Not the default gateway group.
+				continue;
+			}
+
+			// Filter out members that aren't a default gateway.
+			$members = [];
+			foreach ($group['item'] as $member) {
+				list($name, $tier) = explode('|', $member);
+				if (!is_string($name) || (strlen($name) < 1) || !is_numericint($tier) ||
+				    (!isset($default_gateways4[$name]) && !isset($default_gateways6[$name]))) {
+					// Not one of the default gateways.
+					continue;
+				}
+				$members[$name] = $tier;
+			}
+
+			// Get the default gateway with the first highest tier in the group.
+			asort($members, SORT_NATURAL);
+			foreach ($members as $name => $member) {
+				if (isset($default_gateways4[$name])) {
+					$primary_default_gw4 = &$default_gateways4[$name];
+				} else {
+					$primary_default_gw6 = &$default_gateways6[$name];
+				}
+				break;
+			}
+
+			// Don't check gateway groups after finding the primary gateway.
+			if ($check_gwg4 && !$check_gwg6) {
+				if (isset($primary_default_gw4)) {
+					break;
+				}
+			} elseif ($check_gwg6 && !$check_gwg4) {
+				if (isset($primary_default_gw6)) {
+					break;
+				}
+			} elseif (isset($primary_default_gw4) && isset($primary_default_gw6)) {
+				break;
+			}
+		}
+	}
+	// Use the first default gateway on the list. This is a last resort
+	// in the case of multiple default gateways. Otherwise the list
+	// will contain a single gateway which is the primary gateway. 
+	if (!isset($primary_default_gw4)) {
+		$primary_default_gw4 = &$default_gateways4[array_key_first($default_gateways4)];
+	}
+	if (!isset($primary_default_gw6)) {
+		$primary_default_gw6 = &$default_gateways6[array_key_first($default_gateways6)];
+	}
+	// Ensure a single default gateway per IP address family.
+	foreach ($default_gateways4 as &$gw) {
+		if ($gw['name'] != $primary_default_gw4['name']) {
+			unset($gw['isdefaultgw']);
+		}
+	}
+	foreach ($default_gateways6 as &$gw) {
+		if ($gw['name'] != $primary_default_gw6['name']) {
+			unset($gw['isdefaultgw']);
+		}
 	}
 
 	return $gways;
@@ -2670,12 +2793,14 @@ function save_gateway($gateway_settings, $realid = "", $json = false) {
 			route_del($a_gateway_item['gateway']);
 		}
 
-		/* NOTE: If monitor ip is changed need to cleanup the old static route */
+		/* NOTE: If monitor ip changed or no route is preferred, remove the old static route */
 		if ($gateway_settings['monitor'] != "dynamic" &&
 		    !empty($a_gateway_item) &&
 		    is_ipaddr($a_gateway_item['monitor']) &&
-		    $gateway_settings['monitor'] != $a_gateway_item['monitor'] &&
-		    $gateway['gateway'] != $a_gateway_item['monitor']) {
+		    (($gateway['monitor'] != $a_gateway_item['monitor'] &&
+		        $gateway['gateway'] != $a_gateway_item['monitor']) ||
+		    (isset($gateway['dpinger_dont_add_static_route']) &&
+		        !isset($a_gateway_item['dpinger_dont_add_static_route'])))) {
 			route_del($a_gateway_item['monitor']);
 		}
 	}

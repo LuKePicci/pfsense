@@ -565,6 +565,7 @@ $priv_list['page-services-captiveportal-filemanager']['match'][] = "services_cap
 $priv_list['page-services-captiveportal-hasync'] = array();
 $priv_list['page-services-captiveportal-hasync']['name'] = gettext("WebCfg - Services: Captive Portal HA");
 $priv_list['page-services-captiveportal-hasync']['descr'] = gettext("Allow access to the 'Services: Captive Portal High Availability' page.");
+$priv_list['page-services-captiveportal-hasync']['warn'] = "standard-warning-root";
 $priv_list['page-services-captiveportal-hasync']['match'] = array();
 $priv_list['page-services-captiveportal-hasync']['match'][] = "services_captiveportal_hasync.php*";
 
@@ -1147,6 +1148,7 @@ $priv_list['page-system-groupmanager-addprivs']['match'][] = "system_groupmanage
 $priv_list['page-system-hasync'] = array();
 $priv_list['page-system-hasync']['name'] = gettext("WebCfg - System: High Availability Sync");
 $priv_list['page-system-hasync']['descr'] = gettext("Allow access to the 'System: High Availability Sync' page.");
+$priv_list['page-system-hasync']['warn'] = "standard-warning-root";
 $priv_list['page-system-hasync']['match'] = array();
 $priv_list['page-system-hasync']['match'][] = "system_hasync.php*";
 

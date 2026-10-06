@@ -37,7 +37,7 @@ pkg_remove_prefix($pkg_name);
 
 echo "Installing package \"{$pkg_name}\"... ";
 
-if (mwexec("/usr/local/sbin/{$g['product_name']}-upgrade -y -i {$g['pkg_prefix']}{$pkg_name}") == 0) {
+if (mwexec("/usr/local/sbin/{$g['product_name']}-upgrade -y -i {$g['pkg_prefix']}{$pkg_name}", LOG_ERR) == 0) {
 	echo "Done.\n";
 	return true;
 } else {

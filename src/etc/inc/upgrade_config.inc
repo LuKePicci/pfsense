@@ -3424,7 +3424,7 @@ function upgrade_106_to_107() {
 			}
 		}
 		unset($tracker, $rule);
-		set_filter_rules_map($filter_rule_config);
+		set_filter_rules_list($filter_rule_config);
 	}
 	$nat_rule_config = get_anynat_rules_list('rdr');
 	if (is_array($nat_rule_config)) {
@@ -3466,7 +3466,7 @@ function upgrade_108_to_109() {
 		}
 		unset($pos);
 	}
-	set_filter_rules_map($filter_rule_config);
+	set_filter_rules_list($filter_rule_config);
 }
 
 function upgrade_109_to_110() {
@@ -7340,6 +7340,53 @@ function upgrade_244_to_245() {
 	$full_config = config_get_path('', []);
 	migrate_config_encoding_244_to_245($full_config);
 	config_set_path('', $full_config);
+}
+
+function upgrade_245_to_246() {
+	/**
+	 * Firewall rules must set the Action type for proper PF rule
+	 * generation. Rules added as part of a NAT rule, e.g. unassociated
+	 * rules, may not have the Action type set. Rules without a type are
+	 * assumed to be "pass" rules.
+	 *
+	 * Additionally these rules may have a protocol value of "any" that
+	 * was inhereted from the NAT rule. In such cases the protocol for
+	 * the filter rule should instead be unset.
+	 */
+	$changes = [];
+	$rules_list = get_filter_rules_list();
+	foreach ($rules_list as $ridx => &$rule) {
+		$changed = false;
+
+		if (isset($rule['protocol']) && (strtolower($rule['protocol']) == "any")) {
+			unset($rule['protocol']);
+			$changed = true;
+		}
+		if (!isset($rule['type']) || !is_string($rule['type']) || (strlen($rule['type']) < 1)) {
+			$rule['type'] = 'pass';
+			$changed = true;
+		}
+
+		if (!$changed) {
+			continue;
+		}
+
+		if (isset($rule['descr']) && is_string($rule['descr']) && (strlen($rule['descr']) > 0)) {
+			$changes_message = gettext(sprintf(" (rule %s)", "\"{$rule['descr']})\""));
+		} elseif (isset($rule['tracker']) && (strlen(strval($rule['tracker'])) > 0)) {
+			$changes_message = gettext(sprintf(" (rule %s)", strval($rule['tracker'])));
+		} else {
+			$changes_message = gettext(sprintf(" (rule ID %s)", $ridx));
+		}
+		$changes[] = gettext('Corrected invalid configuration in firewall rule') . $changes_message;
+	}
+	unset($rule);
+	if (!empty($changes)) {
+		set_filter_rules_list($rules_list);
+		foreach ($changes as $message) {
+			logger(LOG_INFO, $message, LOG_PREFIX_UPGRADE);
+		}
+	}
 }
 
 /*

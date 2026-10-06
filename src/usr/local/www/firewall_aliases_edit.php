@@ -63,6 +63,8 @@ if (isset($_REQUEST['dup']) && is_numericint($_REQUEST['dup'])) {
 	$dup = true;
 }
 
+$alias_is_managed = false;
+
 if (isset($id) && config_get_path('aliases/alias/' . $id)) {
 	$original_alias_name = config_get_path('aliases/alias/' . $id . '/name');
 	if (!$dup) {
@@ -84,6 +86,7 @@ if (isset($id) && config_get_path('aliases/alias/' . $id)) {
 			$pconfig['address'] = config_get_path('aliases/alias/' . $id . '/aliasurl');
 		}
 	}
+	$alias_is_managed = is_alias_managed($pconfig);
 }
 
 if ($dup) {
@@ -101,7 +104,7 @@ if ($_POST['save']) {
 	$origname = $pconfig['name'];
 }
 
-if ($_REQUEST['exportaliases']) {
+if ($_REQUEST['exportaliases'] && !$alias_is_managed) {
 	$addresses = explode(" ", $pconfig['address']);
 	$details = explode("||", $pconfig['detail']);
 	$exportalias = array();

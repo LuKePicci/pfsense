@@ -128,9 +128,8 @@ if ($tab == 'all'):
 		if ($alias["url"]) {
 			echo htmlspecialchars($alias["url"]);
 		} elseif (is_array($alias["aliasurl"])) {
-			$aliasurls = implode(", ", array_slice($alias["aliasurl"], 0, 10));
-			echo htmlspecialchars($aliasurls);
-			if (is_array($aliasurls) && (count($aliasurls) > 10)) {
+			echo htmlspecialchars(implode(", ", array_slice($alias["aliasurl"], 0, ALIAS_CONTENT_DISPLAY_PAGE_MAX)));
+			if (count($alias["aliasurl"]) > ALIAS_CONTENT_DISPLAY_PAGE_MAX) {
 				echo "&hellip;";
 			}
 		} elseif (!empty($alias['address'])) {
@@ -138,8 +137,8 @@ if ($tab == 'all'):
 			if ($alias['type'] == 'host') {
 				$tmpaddr = array_map('alias_idn_to_utf8', $tmpaddr);
 			}
-			echo htmlspecialchars(implode(", ", array_slice($tmpaddr, 0, 10)));
-			if (count($tmpaddr) > 10) {
+			echo htmlspecialchars(implode(", ", array_slice($tmpaddr, 0, ALIAS_CONTENT_DISPLAY_PAGE_MAX)));
+			if (count($tmpaddr) > ALIAS_CONTENT_DISPLAY_PAGE_MAX) {
 				echo '&hellip;';
 			}
 		} else {
@@ -208,8 +207,18 @@ endif;
 			break;
 		}
 		if ($show_alias):
+			$alias_is_managed = is_alias_managed($alias);
 ?>
 		<tr>
+		<?php if ($alias_is_managed): ?>
+			<td>
+				<?=htmlspecialchars($alias['name'])?>
+			</td>
+			<td nowrap>
+				<?=htmlspecialchars($alias_types[$alias['type']])?>
+			</td>
+			<td>
+		<?php else: ?>
 			<td ondblclick="document.location='firewall_aliases_edit.php?id=<?=$i;?>';">
 				<?=htmlspecialchars($alias['name'])?>
 			</td>
@@ -217,14 +226,14 @@ endif;
 				<?=htmlspecialchars($alias_types[$alias['type']])?>
 			</td>
 			<td ondblclick="document.location='firewall_aliases_edit.php?id=<?=$i;?>';">
+		<?php endif; ?>
 <?php
 	if ($alias["url"]) {
 		echo htmlspecialchars($alias["url"]) . "<br />";
 	} else {
 		if (is_array($alias["aliasurl"])) {
-			$aliasurls = implode(", ", array_slice($alias["aliasurl"], 0, 10));
-			echo htmlspecialchars($aliasurls);
-			if (is_array($aliasurls) && (count($aliasurls) > 10)) {
+			echo htmlspecialchars(implode(", ", array_slice($alias["aliasurl"], 0, ALIAS_CONTENT_DISPLAY_PAGE_MAX)));
+			if (count($alias["aliasurl"]) > ALIAS_CONTENT_DISPLAY_PAGE_MAX) {
 				echo "&hellip;<br />";
 			}
 			echo "<br />\n";
@@ -233,14 +242,22 @@ endif;
 		if ($alias['type'] == 'host') {
 			$tmpaddr = array_map('alias_idn_to_utf8', $tmpaddr);
 		}
-		$addresses = implode(", ", array_slice($tmpaddr, 0, 10));
+		$addresses = implode(", ", array_slice($tmpaddr, 0, ALIAS_CONTENT_DISPLAY_PAGE_MAX));
 		echo htmlspecialchars($addresses);
-		if (count($tmpaddr) > 10) {
+		if (count($tmpaddr) > ALIAS_CONTENT_DISPLAY_PAGE_MAX) {
 			echo '&hellip;';
 		}
 	}
 ?>
 			</td>
+		<?php if ($alias_is_managed): ?>
+			<td>
+				<?=htmlspecialchars($alias['descr'])?>&nbsp;
+			</td>
+			<td>
+				<i class="fa-solid fa-lock text-danger" title="<?=gettext('This alias is automatically managed')?>"></i>
+			</td>
+		<?php else: ?>
 			<td ondblclick="document.location='firewall_aliases_edit.php?id=<?=$i;?>';">
 				<?=htmlspecialchars($alias['descr'])?>&nbsp;
 			</td>
@@ -249,6 +266,7 @@ endif;
 				<a class="fa-regular fa-clone" title="<?=gettext('Copy alias')?>" href="firewall_aliases_edit.php?dup=<?=$i;?>" ></a>
 				<a class="fa-solid fa-trash-can"	title="<?=gettext("Delete alias")?>" href="?act=del&amp;tab=<?=$tab?>&amp;id=<?=$i?>" usepost></a>
 			</td>
+		<?php endif; ?>
 		</tr>
 <?php endif?>
 <?php endforeach?>

@@ -544,6 +544,10 @@ if ($_POST['save']) {
 
 	unset($input_errors);
 
+	if (isset($id) && $a_filter[$id] && is_filter_rule_managed($a_filter[$id])) {
+		$input_errors[] = gettext("This rule cannot be edited because is automatically managed.");
+	}
+
 	if (!array_key_exists($_POST['ipprotocol'], $icmplookup)) {
 		$input_errors[] = gettext("The IP protocol is not recognized.");
 		unset($_POST['ipprotocol']);
@@ -1681,7 +1685,7 @@ foreach (['src' => gettext('Source'), 'dst' => gettext('Destination')] as $type 
 	}
 
 	$ruleValues_flags = array_merge([SPECIALNET_CHECKPERM], $filter_srcdsttype_flags);
-	if ($type != 'dst' && !isset($a_filter[$id]['floating']) && $if != "FloatingRules") {
+	if ($type != 'dst' && !$is_floating_rule) {
 		$ruleValues_flags = array_diff($ruleValues_flags, [SPECIALNET_SELF]);
 	}
 

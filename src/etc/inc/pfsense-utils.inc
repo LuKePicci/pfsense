@@ -2139,13 +2139,12 @@ function download_file($url, $destination, $verify_ssl = true, $connect_timeout 
 	} else {
 		curl_setopt($ch, CURLOPT_USERAGENT, g_get('product_label') . '/' . g_get('product_version'));
 	}
-
+	curl_setopt($ch, CURLOPT_FORBID_REUSE, true);
 	set_curlproxy($ch);
 
 	@curl_exec($ch);
 	$http_code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 	fclose($fp);
-	curl_close($ch);
 	if ($http_code == 200) {
 		return true;
 	} else {
@@ -2192,13 +2191,12 @@ function download_file_with_progress_bar($url, $destination, $verify_ssl = true,
 	} else {
 		curl_setopt($ch, CURLOPT_USERAGENT, g_get('product_label') . '/' . g_get('product_version'));
 	}
-
+	curl_setopt($ch, CURLOPT_FORBID_REUSE, true);
 	set_curlproxy($ch);
 
 	@curl_exec($ch);
 	$http_code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 	fclose($fout);
-	curl_close($ch);
 	if ($http_code == 200) {
 		return true;
 	} else {
@@ -2618,10 +2616,12 @@ function process_alias_tgz($temp_filename) {
 		logger(LOG_CRIT, localize_text("Alias archive is a .tar/tgz file which cannot be decompressed because utility is missing!"));
 		return false;
 	}
+	$temp_dir = "{$temp_filename}/aliasdata/";
+	mkdir($temp_dir);
 	rename("{$temp_filename}/aliases", "{$temp_filename}/aliases.tgz");
-	mwexec("/usr/bin/tar xzf {$temp_filename}/aliases.tgz -C {$temp_filename}/aliases/");
+	mwexec("/usr/bin/tar xzf {$temp_filename}/aliases.tgz -C {$temp_dir}");
 	unlink("{$temp_filename}/aliases.tgz");
-	$files_to_process = return_dir_as_array("{$temp_filename}/");
+	$files_to_process = return_dir_as_array($temp_dir);
 	/* foreach through all extracted files and build up aliases file */
 	$fd = @fopen("{$temp_filename}/aliases", "w");
 	if (!$fd) {
@@ -2629,19 +2629,29 @@ function process_alias_tgz($temp_filename) {
 		return false;
 	}
 	foreach ($files_to_process as $f2p) {
+		/* Entries in this array should not have a directory path,
+		 * but be safe and add the expected path to the basename. */
+		$f2p = $temp_dir . basename($f2p);
+		/* Do not process links or items which are not files */
+		if (is_link($f2p) ||
+			!is_file($f2p)) {
+			logger(LOG_ERR, localize_text('The following entry from the archive is not a regular file: %1$s', $f2p));
+			continue;
+		}
 		$tmpfd = @fopen($f2p, 'r');
 		if (!$tmpfd) {
 			logger(LOG_ERR, localize_text('The following file could not be read %1$s from %2$s', $f2p, $temp_filename));
 			continue;
 		}
-		while (($tmpbuf = fread($tmpfd, 65536)) !== FALSE) {
+		while ($tmpbuf = fgets($tmpfd)) {
 			fwrite($fd, $tmpbuf);
 		}
 		fclose($tmpfd);
-		unlink($f2p);
+		@unlink($f2p);
 	}
 	fclose($fd);
 	unset($tmpbuf);
+	@rmdir_recursive($tmp_dir);
 
 	return true;
 }
@@ -3081,15 +3091,30 @@ function remove_config_rules(array &$rules, array &$separators, array $index_lis
 	return $result;
 }
 
-function set_config_rules_order(array &$rules, int &$rule_index, array $order) {
-	$order = array_flip($order);
+/**
+ * Apply a rule order to a list of config rules.
+ *
+ * @param array[int] $order A contiguous slice of config rule indices
+ * 		that indicate the new rule positions.
+ * @param array $rules_list A list of config rules.
+ * @return bool True if reordered.
+ */
+function set_rules_list_order(array &$rules_list, array $order): bool {
+	$first_rule_to_order = min($order);
+	$reodered_rules_count = count($order);
+	$ordered_rules = array_flip($order);
+	$unordered_rules = array_slice(
+		$rules_list,
+		$first_rule_to_order,
+		$reodered_rules_count,
+		true
+	);
 
 	$found = false;
-	foreach ($rules as &$rule) {
-		++$rule_index;
-		if (isset($order[$rule_index])) {
+	foreach ($unordered_rules as $rule_index => &$rule) {
+		if (isset($ordered_rules[$rule_index])) {
 			$found = true;
-			$order[$rule_index] = &$rule;
+			$ordered_rules[$rule_index] = &$rule;
 		}
 	}
 	unset($rule);
@@ -3098,14 +3123,58 @@ function set_config_rules_order(array &$rules, int &$rule_index, array $order) {
 		return false;
 	}
 
-	if (count(array_filter($order, fn($r) => is_array($r))) != count($rules)) {
-		// Index is unaligned.
-		return null;
+	if (!empty(array_filter($ordered_rules, fn($r) => !is_array($r)))) {
+		// Index is unaligned - a reordered rule is missing.
+		return false;
 	}
 
 	// Reorder rules.
-	$rules = array_values($order);
+	array_splice($rules_list, $first_rule_to_order, $reodered_rules_count, $ordered_rules);
 	return true;
+}
+
+/**
+ * Apply a rule order to the given category map of rules.
+ *
+ * @param array[int] $order A sub-category bound list of config rule
+ * 		indices that indicate the new rule positions.
+ * @param array $rules_map A map of config rules.
+ * @return bool True if reordered.
+ */
+function set_rules_map_order(array &$rules_map, array $order): bool {
+	$first_rule_to_order = min($order);
+	$order_count = count($order);
+	$unordered_rules = null;
+
+	$rule_index = -1;
+	foreach ($rules_map as &$groups) {
+		foreach ($groups as &$subcategories) {
+			foreach ($subcategories as &$rules) {
+				$rules_count = count($rules);
+				if ($rules_count < $first_rule_to_order) {
+					$rule_index += $rules_count;
+					continue;
+				}
+				if ($order_count != $rules_count) {
+					// Index is unaligned - a rule was added or removed.
+					break 3;
+				}
+
+				$unordered_rules = &$rules;
+
+				// Any further rules would be out of bounds of this
+				// subcategory. An order that overlaps subcategories
+				// would result in that order being overwritten by the
+				// order defined for the PFConfig class.
+				break 3;
+			}
+		}
+	}
+	if (!isset($unordered_rules)) {
+		return false;
+	}
+
+	return set_rules_list_order($unordered_rules, $order);
 }
 
 /**
@@ -3254,6 +3323,164 @@ function get_filter_rules_index(array $search_index, string $filter_interface = 
 }
 
 /**
+ * Sorts a category map of PFConfig rules.
+ * Adapted from PFConfig->sort_categories().
+ * @param array $map A list of rules mapped by category.
+ * @return void
+ */
+function sort_pfconfig_rules_map(array &$map): void {
+	if (!isset($order)) {
+		$order_init = [];
+		foreach (array_values(PFCONFIG_CATEGORIES) as $constant_name) {
+			if (!defined($constant_name)) {
+				continue;
+			}
+			$order_init[constant($constant_name)['id']] = $constant_name; 
+		}
+		static $order = array_flip(array_keys($order_init));
+	}
+
+	$ordered = $order;
+	foreach ($map as $key => $item) {
+		if (!array_is_list($item)) {
+			// Handle category.
+			if (!isset($ordered[$key])) {
+				// Invalid category.
+				continue;
+			}
+
+			// Order each group.
+			foreach ($item as &$group) {
+				sort_pfconfig_rules_map($group);
+			}
+		}
+		$ordered[$key] = $item;
+	}
+
+	$ordered = array_filter($ordered, function ($value) {
+		// Filter out items with int keys from the flip.
+		return is_array($value);
+	});
+	$map = $ordered;
+}
+
+/**
+ * Get the categories for a NAT rule.
+ * @param array $rule The config rule item.
+ * @return array{ category: string, group: string, subcategory: string  }
+ */
+function get_anynat_rule_category(array $rule, string $nat_type = ''): array {
+	$category_is_set = $group_is_set = $subcategory_is_set = false;
+	if (isset($rule['force_category']) && is_string($rule['force_category']) && (strlen($rule['force_category']) > 0)) {
+		list($rule_category, $rule_group, $rule_subcategory) = explode('/', $rule['force_category']);
+		if (($rule_category != '*') && isset(PFCONFIG_CATEGORIES[$rule_category])) {
+			$category_is_set = true;
+		}
+		if (isset($rule_group) && ($rule_group != '*') && isset(PFCONFIG_CATEGORIES[$rule_group])) {
+			$group_is_set = true;
+		}
+		if (isset($rule_subcategory) && ($rule_subcategory != '*') && isset(PFCONFIG_CATEGORIES[$rule_subcategory])) {
+			$subcategory_is_set = true;
+		}
+	}
+
+	if (!$category_is_set) {
+		$rule_category = PFCONFIG_ALL_NAT_RULES['id'];
+	}
+
+	if (!$group_is_set) {
+		$rule_group = $rule_category;
+	}
+
+	if (!$subcategory_is_set) {
+		$rule_subcategory = match ($nat_type) {
+			'rdr' => PFCONFIG_USER_NAT_INBOUND['id'],
+			'binat' => PFCONFIG_USER_NAT_BINAT['id'],
+			'nat' => PFCONFIG_USER_NAT_OUTBOUND['id'],
+			'npt' => PFCONFIG_USER_NAT_NPT['id'],
+			default => $rule_category
+		};
+	}
+
+	return [
+		'category' => $rule_category,
+		'group' => $rule_group,
+		'subcategory' => $rule_subcategory
+	];
+}
+
+/**
+ * Get the categories for a filter rule.
+ * @param array $rule The config rule item.
+ * @return array{ category: string, group: string, subcategory: string  }
+ */
+function get_filter_rule_category(array $rule): array {
+	if (!isset($user_interface_groups)) {
+		$interface_groups = [];
+		foreach (config_get_path('ifgroups/ifgroupentry', []) as $ifgen) {
+			$interface_groups[] = $ifgen['ifname'];
+		}
+		static $user_interface_groups = array_flip($interface_groups);
+	}
+
+	if (!isset($system_interface_groups)) {
+		global $vpn_and_ppp_ifs;
+		static $system_interface_groups = array_flip($vpn_and_ppp_ifs);
+	}
+
+	$category_is_set = $group_is_set = $subcategory_is_set = false;
+	if (isset($rule['force_category']) && is_string($rule['force_category']) && (strlen($rule['force_category']) > 0)) {
+		list($rule_category, $rule_group, $rule_subcategory) = explode('/', $rule['force_category']);
+		if (($rule_category != '*') && isset(PFCONFIG_CATEGORIES[$rule_category])) {
+			$category_is_set = true;
+		}
+		if (isset($rule_group) && ($rule_group != '*') && isset(PFCONFIG_CATEGORIES[$rule_group])) {
+			$group_is_set = true;
+		}
+		if (isset($rule_subcategory) && ($rule_subcategory != '*') && isset(PFCONFIG_CATEGORIES[$rule_subcategory])) {
+			$subcategory_is_set = true;
+		}
+	}
+
+	if (!$category_is_set) {
+		if (isset($rule['floating'])) {
+			// Floating rules.
+			$rule_category = PFCONFIG_USER_FILTER_FLOATING['id'];
+		} elseif (isset($user_interface_groups[$rule['interface']])) {
+			// User interface group rules.
+			$rule_category = PFCONFIG_USER_FILTER_IF_GROUP_USER['id'];
+		} elseif (isset($system_interface_groups[$rule['interface']])) {
+			// Sytem interface group rules.
+			$rule_category = PFCONFIG_USER_FILTER_IF_GROUP_SYSTEM['id'];
+		} else {
+			// Interface rules.
+			$rule_category = PFCONFIG_USER_FILTER_INTERFACE['id'];
+		}
+	}
+
+	if (!$group_is_set) {
+		if (isset($rule['floating'])) {
+			// Floating rules.
+			$rule_group = 'FloatingRules';
+		} else {
+			// Interface rules.
+			$rule_group = $rule['interface'];
+		}
+	}
+
+	if (!$subcategory_is_set) {
+		// Any rule.
+		$rule_subcategory = $rule_category;
+	}
+
+	return [
+		'category' => $rule_category,
+		'group' => $rule_group,
+		'subcategory' => $rule_subcategory
+	];
+}
+
+/**
  * Get filter rules sorted into their respective PFConfig category.
  */
 function get_filter_rules_map(array $rules_list = []): array {
@@ -3287,56 +3514,27 @@ function get_filter_rules_map(array $rules_list = []): array {
 
 	// Other interfaces.
 	global $vpn_and_ppp_ifs;
-	$other_interfaces = $vpn_and_ppp_ifs;
-	$other_interfaces = array_flip($other_interfaces);
 
-	// Order the rules into their respective categories.
-	$interface_order = $interface_groups + $assigned_interfaces + $other_interfaces;
-	$categories = array_combine(array_keys(PFCONFIG_CATEGORIES), array_fill(0, count(PFCONFIG_CATEGORIES), null));
+	// Put rules into their respective categories.
+	$interface_order = $interface_groups + $assigned_interfaces + array_flip($vpn_and_ppp_ifs);
+	$categories = [];
 	foreach ($rules_list as $rule) {
 		if (!is_array($rule) || isset($rule['separator'])) {
 			// Skip invalid rule entires.
 			continue;
 		}
 
-		if (isset($rule['force_category']) && isset(PFCONFIG_CATEGORIES[$rule['force_category']])) {
-			// Category override.
-			$rule_category = $rule['force_category'];
-			$rule_group = $rule_category;
-			$rule_subcategory = $rule_category;
-		} elseif (isset($rule['floating'])) {
-			// Floating rules.
-			$rule_category = PFCONFIG_USER_FILTER_FLOATING['id'];
-			$rule_group = 'FloatingRules';
-			$rule_subcategory = $rule_category;
-		} elseif (isset($interface_groups[$rule['interface']])) {
-			// User interface group rules.
-			$rule_category = PFCONFIG_USER_FILTER_IF_GROUP_USER['id'];
-			$rule_group = $rule['interface'];
-			$rule_subcategory = $rule_category;
-		} elseif (isset($other_interfaces[$rule['interface']])) {
-			// Sytem interface group rules.
-			$rule_category = PFCONFIG_USER_FILTER_IF_GROUP_SYSTEM['id'];
-			$rule_group = $rule['interface'];
-			$rule_subcategory = $rule_category;
-		} else {
-			// Interface rules.
-			$rule_category = PFCONFIG_USER_FILTER_INTERFACE['id'];
-			$rule_group = $rule['interface'];
-			$rule_subcategory = $rule_category;
-		}
-
 		array_set_path(
 			$categories,
-			"{$rule_category}/{$rule_group}/{$rule_subcategory}/",
+			implode('/', get_filter_rule_category($rule)) . '/',
 			$rule
 		);
 	}
 
-	// Clear any categories which weren't set.
-	$categories = array_filter($categories);
+	// Sort the categories.
+	sort_pfconfig_rules_map($categories);
 
-	// Order each category's interface rule groups.
+	// Sort subcategory groups of interface rules.
 	foreach ($categories as &$category) {
 		if (empty(array_intersect_key($category, $interface_order))) {
 			// Skip categories that don't have any groups for an interface.
@@ -3380,9 +3578,9 @@ function get_filter_rules_map(array $rules_list = []): array {
 /**
  * Get a sorted list of all filter rules.
  */
-function get_filter_rules_list(): array {
+function get_filter_rules_list(array|null $rules_map = null): array {
 	$rules_list = [];
-	$rules_map = get_filter_rules_map();
+	$rules_map ??= get_filter_rules_map();
 	foreach ($rules_map as &$category) {
 		foreach ($category as &$group) {
 			foreach ($group as &$rules) {
@@ -3425,28 +3623,12 @@ function set_filter_rules_list(array $rules_list): void {
  * correspond to an existing config rule item.
  */
 function set_filter_rules_order(array $order) {
-	$rules_map = get_filter_rules_map();
-	$set_rules = false;
-	$rule_index = -1;
-	foreach ($rules_map as &$category) {
-		foreach ($category as &$group) {
-			foreach ($group as &$rules) {
-				$result = set_config_rules_order($rules, $rule_index, $order);
-				if (is_bool($result)) {
-					$set_rules |= $result;
-				} else {
-					$set_rules = false;
-					break 3;
-				}
-			}
-		}
+	$rules = get_filter_rules_list();
+	if (set_rules_list_order($rules, $order)) {
+		set_filter_rules_list($rules);
+		return true;
 	}
-	unset($rules, $group, $category);
-	if (!$set_rules) {
-		return false;
-	}
-	set_filter_rules_map($rules_map);
-	return true;
+	return false;
 }
 
 /**
@@ -3579,25 +3761,21 @@ function get_anynat_rules_map(string $nat_type, array $rules_list = []): array {
 			global $rdr_rules_map;
 			$rules_map = &$rdr_rules_map;
 			$path = 'nat/rule';
-			$rule_subcategory = PFCONFIG_USER_NAT_INBOUND['id'];
 			break;
 		case 'binat':
 			global $binat_rules_map;
 			$rules_map = &$binat_rules_map;
 			$path = 'nat/onetoone';
-			$rule_subcategory = PFCONFIG_USER_NAT_BINAT['id'];
 			break;
 		case 'nat':
 			global $nat_rules_map;
 			$rules_map = &$nat_rules_map;
 			$path = 'nat/outbound/rule';
-			$rule_subcategory = PFCONFIG_USER_NAT_OUTBOUND['id'];
 			break;
 		case 'npt':
 			global $npt_rules_map;
 			$rules_map = &$npt_rules_map;
 			$path = 'nat/npt';
-			$rule_subcategory = PFCONFIG_USER_NAT_NPT['id'];
 			break;
 		default:
 			return [];
@@ -3617,27 +3795,23 @@ function get_anynat_rules_map(string $nat_type, array $rules_list = []): array {
 		return [];
 	}
 
-	// All NAT rules have the same category - only subcategories differ.
-	$rule_category = PFCONFIG_ALL_NAT_RULES['id'];
-	$rule_group = $rule_category;
-	$categories = array_combine(array_keys(PFCONFIG_CATEGORIES), array_fill(0, count(PFCONFIG_CATEGORIES), null));
+	// Put rules into their respective categories.
+	$categories = [];
 	foreach ($rules_list as $rule) {
 		if (!is_array($rule)) {
 			// Skip invalid rule entires.
 			continue;
 		}
 
-		if (isset($rule['force_category']) && isset(PFCONFIG_CATEGORIES[$rule['force_category']])) {
-			// Subcategory override.
-			$rule_subcategory = $rule['force_category'];
-		}
-
 		array_set_path(
 			$categories,
-			"{$rule_category}/{$rule_group}/{$rule_subcategory}/",
+			implode('/', get_anynat_rule_category($rule)) . '/',
 			$rule
 		);
 	}
+
+	// Sort the categories.
+	sort_pfconfig_rules_map($categories);
 
 	// Clear any categories which weren't set.
 	$categories = array_filter($categories);
@@ -3776,9 +3950,7 @@ function set_anynat_rules_order(string $type, array $order) {
 		return false;
 	}
 
-	$rule_index = -1;
-	$set_rules = set_config_rules_order($rules, $rule_index, $order);
-	if (!$set_rules) {
+	if (!set_rules_list_order($rules, $order)) {
 		return false;
 	}
 
@@ -4824,12 +4996,15 @@ function fix_config_artifacts() {
 	 * ===================================================================
 	 */
 
-	// Remove MTU and MSS custom options for tunnels with a proper interface
-	// assginment. These are set automatically when the service restarts.
+	// Tunnels with assigned interfaces that need to be configured.
 	$openvpn_dco_interfaces = [];
+
+	// Collect OpenVPN DCO tunnels with MTU/MSS custom options and
+	// strip those options. The filtered options will be used instead
+	// for any tunnels that have an assigned interface already
+	// configured with MTU and MSS.
 	foreach (['openvpn/openvpn-server', 'openvpn/openvpn-client'] as $config_path) {
-		// Find OpenVPN tunnels with DCO and tun-mtu.
-		foreach (array_get_path($conf, $config_path, []) as $idx => $tunnel_config) {
+		foreach (array_get_path($conf, $config_path, []) as $config_idx => $tunnel_config) {
 			if (!isset($tunnel_config['dco']) || ($tunnel_config['dco'] != 'enabled') ||
 			    isset($tunnel_config['disable']) | empty($tunnel_config['custom_options'])) {
 				continue;
@@ -4862,40 +5037,49 @@ function fix_config_artifacts() {
 					);
 				}
 				$openvpn_dco_interfaces[$interface_name] = [
-					'path' => "{$config_path}/{$idx}/custom_options",
+					'path' => "{$config_path}/{$config_idx}/custom_options",
 					'value' => implode(';', $custom_options),
 					'description' => $description
 				];
 			}
 		}
 	}
+
+	// Avoid a notice for tunnels with appropriate interfaces.
+	$unconfigured_openvpn_dco_descriptions = [];
 	foreach (array_get_path($conf, 'interfaces', []) as $interface_label => $interface_config) {
 		if (!isset($openvpn_dco_interfaces[array_get_path($interface_config, 'if', '')])) {
+			// Skip unasiggned interfaces.
 			continue;
 		}
-		if (!array_path_enabled($interface_config, $interface_label) || empty($interface_config['mss'])) {
+		if (!array_path_enabled($interface_config, '')) {
+			// Skip disabled interfaces.
 			continue;
 		}
+		if (is_numericint($interface_config['mtu']) && is_numericint($interface_config['mss'])) {
+			// The assigned interface configuration takes precedence.
+			// The appropriate OpenVPN configuration for MTU/MSS is
+			// generated without including it in the custom options.
+			array_set_path($conf,
+				$openvpn_dco_interfaces[$interface_config['if']]['path'],
+				$openvpn_dco_interfaces[$interface_config['if']]['value']
+			);
+			$conf_write = true;
 
-		// Update custom options.
-		array_set_path($conf,
-			$openvpn_dco_interfaces[$interface_config['if']]['path'],
-			$openvpn_dco_interfaces[$interface_config['if']]['value']
-		);
-		$conf_write = true;
-
-		// Don't trigger a notice for tunnels already configured correctly.
-		unset($openvpn_dco_interfaces[$interface_config['if']]);
+			// Skip the notice on interfaces that already set MTU and MSS.
+			continue;
+		}
+		$unconfigured_openvpn_dco_descriptions[] = $openvpn_dco_interfaces[$interface_config['if']]['description'];
 	}
 
 	// File the notice.
-	if (!empty($openvpn_dco_interfaces)) {
+	if (!empty($unconfigured_openvpn_dco_descriptions)) {
 		file_notice('OpenVPN',
 			localize_text(
 				'The following OpenVPN tunnels have a non-default MTU or MSS configuration ' .
 				'with DCO enabled. This requires setting both MTU and MSS values in the ' .
 				'assigned interface configuration (Interfaces > Interface Assignments): %s',
-				implode(', ', array_column($openvpn_dco_interfaces, 'description'))
+				implode(', ', $unconfigured_openvpn_dco_descriptions)
 			)
 		);
 	}
@@ -4924,6 +5108,34 @@ function fix_config_artifacts() {
 		$conf_write = true;
 	}
 	unset($rules);
+
+	/**
+	 * ===================================================================
+	 * The user group "all" is explicitly returned for every user; member
+	 * information is not maintained in config.xml.
+	 * ===================================================================
+	 */
+	$changed = false;
+	$user_groups = array_get_path($conf, 'system/group', []);
+	foreach ($user_groups as &$group) {
+		if ((strval(array_get_path($conf, 'gid')) != "1998") ||
+		    (strval(array_get_path($conf, 'name')) != "all")) {
+			continue;
+		}
+		if (isset($group['member'])) {
+			unset($group['member']);
+			$changed = true;
+		}
+		break;
+	}
+	unset($group);
+
+	// Make the changes.
+	if ($changed) {
+		array_set_path($conf, 'system/group', $user_groups);
+		$conf_write = true;
+	}
+	unset($user_groups);
 
 	/**
 	 * ===================================================================

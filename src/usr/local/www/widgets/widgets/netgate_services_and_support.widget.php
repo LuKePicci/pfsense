@@ -37,6 +37,80 @@ $idfile = "/var/db/uniqueid";
 $FQDN = "https://ews.netgate.com/support";
 $refreshinterval = (24 * 3600);	// 24 hours
 
+function get_support_file_json() {
+	global $supportfile;
+	if (!is_string($supportfile)) {
+		return '';
+	}
+	$allowed_tags = [
+		'b', 'i', 'strong', 'em', 'u', 'strike', 'sub', 'sup',
+		'p', 'br', 'div', 'span', 'hr', 'small', 'big', 'pre',
+		'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+		'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+		'table', 'caption', 'tbody', 'tr', 'th', 'td',
+		'cite', 'blockquote', 'address',
+		'a',
+	];
+	$content = file_get_contents($supportfile);
+	if (!is_string($content)) {
+		return '';
+	}
+	$content = json_decode($content, true);
+	if (!is_array($content)) {
+		return '';
+	}
+	// Validate widget sections.
+	$content = array_filter($content, function ($section) {
+		return (($section == 'summary') || ($section == 'htmltext'));
+	}, ARRAY_FILTER_USE_KEY);
+	if (empty($content)) {
+		return '';
+	}
+
+	foreach ($content as &$data) {
+		// Only include safe elements and keep the values of any others.
+		// For example "<font>foo</font>" would result in "foo".
+		$data = strip_tags($data, $allowed_tags);
+
+		// Parse the data.
+		$doc = Dom\HTMLDocument::createFromString($data, LIBXML_HTML_NOIMPLIED);
+
+		// Only include safe element attributes.
+		foreach ($doc->querySelectorAll('*') as $element) {
+			foreach ($element->attributes as $attr) {
+				switch ($attr->name) {
+				case 'href':
+					if (!is_URL($attr->value, true)) {
+						$element->removeAttribute($attr->name);
+					}
+					break;
+				case 'target':
+					if ($element->tagName == 'a') {
+						$element->setAttribute($attr->name, '_blank');
+					}
+					break;
+				case 'class':
+				case 'style':
+					// Allow only basic characters.
+					$element->setAttribute($attr->name, (preg_replace('/[^\w\-\s:;#.]/', '', $attr->value) ?: ''));
+					break;
+				default:
+					// Remove any other attributes.
+					$element->removeAttribute($attr->name);
+				}
+			}
+		}
+		$data = $doc->saveHtml();
+	}
+	unset($data);
+
+	$content = json_encode($content);
+	if (empty($content)) {
+		return '';
+	}
+
+	return $content;
+}
 
 if ($_REQUEST['ajax']) {
 
@@ -52,9 +126,7 @@ if ($_REQUEST['ajax']) {
 		updateSupport();
 	}
 
-	if (file_exists($supportfile)) {
-		print(file_get_contents($supportfile));
-	}
+	print(get_support_file_json());
 
 	exit;
 }
@@ -90,11 +162,11 @@ function updateSupport() {
 			curl_setopt($ch, CURLOPT_POST, true);
 			curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
 			curl_setopt($ch, CURLOPT_CONNECTTIMEOUT ,4);
+			curl_setopt($ch, CURLOPT_FORBID_REUSE, true);
 			set_curlproxy($ch);
 
 			$response = curl_exec($ch);
 			$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-			curl_close($ch);
 
 			if ($status == 200) {
 				file_put_contents($supportfile, $response);
@@ -110,7 +182,7 @@ print("<div>");
 
 if (file_exists($supportfile) && ( time()-filemtime($supportfile) < $refreshinterval)) {
 	// Print the support data from the file
-	$str = file_get_contents($supportfile);
+	$str = get_support_file_json();
 	$json = json_decode($str, true);
 	print($json['summary']);
 	print($json['htmltext']);

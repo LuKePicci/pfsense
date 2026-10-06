@@ -186,6 +186,23 @@ function enable_rrd_graphing() {
 	$dhcpd_gather = "/usr/local/bin/dhcpd_gather_stats.php";
 	$ntpq = "/usr/local/sbin/ntpq";
 
+	$grep = '/usr/bin/grep';
+	$egrep = '/usr/bin/egrep';
+	$has_gnu_grep = false;
+	if (file_exists('/usr/local/bin/ggrep')) {
+		$grep = '/usr/local/bin/ggrep';
+		$egrep = '/usr/local/bin/ggrep -E';
+		$has_gnu_grep = true;
+	}
+
+	$bc = '/usr/bin/bc';
+	$cut = '/usr/bin/cut';
+	$nc = '/usr/bin/nc';
+	$ps = '/bin/ps';
+	$sort = '/usr/bin/sort';
+	$tail = '/usr/bin/tail';
+	$wc = '/usr/bin/wc';
+
 	$rrdtrafficinterval = 60;
 	$rrdwirelessinterval = 60;
 	$rrdqueuesinterval = 60;
@@ -227,6 +244,9 @@ function enable_rrd_graphing() {
 	/* read the shaper config */
 	read_altq_config();
 
+	/* kill off traffic collector */
+	kill_traffic_collector();
+
 	if (config_path_enabled('rrd')) {
 
 		/* create directory if needed */
@@ -235,17 +255,25 @@ function enable_rrd_graphing() {
 		}
 		chown($rrddbpath, "nobody");
 
-		/* db update script */
-		$rrdupdatesh = "#!/bin/sh\n";
-		$rrdupdatesh .= "\n";
-		$rrdupdatesh .= "export TERM=dumb\n";
-		$rrdupdatesh .= "\n";
-		$rrdupdatesh .= 'echo $$ > ' . g_get('varrun_path') . '/updaterrd.sh.pid';
-		$rrdupdatesh .= "\n";
-		$rrdupdatesh .= "counter=1\n";
-		$rrdupdatesh .= "while [ \"\$counter\" -ne 0 ]\n";
-		$rrdupdatesh .= "do\n";
-		$rrdupdatesh .= "";
+		$rrd_pidfile = g_get('varrun_path') . '/updaterrd.sh.pid';
+
+		$rrdupdatesh = <<<EOD
+#!/bin/sh
+
+export TERM=dumb
+
+if [ -z "\${_RRD_SINGLETON}" ]; then
+	_RRD_SINGLETON=1; export _RRD_SINGLETON
+	exec /usr/bin/lockf -s -k -t 0 $rrd_pidfile /bin/sh "$0" "$@"
+fi
+
+echo $$ > $rrd_pidfile
+
+trap "rm -f $rrd_pidfile; exit 0" HUP INT TERM
+
+while true; do
+
+EOD;
 
 		$i = 0;
 		$ifdescrs = get_configured_interface_with_descr();
@@ -295,7 +323,7 @@ function enable_rrd_graphing() {
 			$rrdupdatesh .= "\n";
 			$rrdupdatesh .= "# polling traffic for interface $ifname $realif IPv4/IPv6 counters \n";
 			$rrdupdatesh .= "$rrdtool update $rrddbpath$ifname$traffic N:";
-			$rrdupdatesh .= "`$pfctl -vvsI -i {$realif} | awk '\\\n";
+			$rrdupdatesh .= "`$pfctl -vvsI -i {$realif} | $awk '\\\n";
 			$rrdupdatesh .= "/In4\/Pass/ { b4pi = \$6 };/Out4\/Pass/ { b4po = \$6 };/In4\/Block/ { b4bi = \$6 };/Out4\/Block/ { b4bo = \$6 };\\\n";
 			$rrdupdatesh .= "/In6\/Pass/ { b6pi = \$6 };/Out6\/Pass/ { b6po = \$6 };/In6\/Block/ { b6bi = \$6 };/Out6\/Block/ { b6bo = \$6 };\\\n";
 			$rrdupdatesh .= "END {print b4pi \":\" b4po \":\" b4bi \":\" b4bo \":\" b6pi \":\" b6po \":\" b6bi \":\" b6bo};'`\n";
@@ -328,7 +356,7 @@ function enable_rrd_graphing() {
 			$rrdupdatesh .= "\n";
 			$rrdupdatesh .= "# polling packets for interface $ifname $realif \n";
 			$rrdupdatesh .= "$rrdtool update $rrddbpath$ifname$packets N:";
-			$rrdupdatesh .= "`$pfctl -vvsI -i {$realif} | awk '\\\n";
+			$rrdupdatesh .= "`$pfctl -vvsI -i {$realif} | $awk '\\\n";
 			$rrdupdatesh .= "/In4\/Pass/ { b4pi = \$4 };/Out4\/Pass/ { b4po = \$4 };/In4\/Block/ { b4bi = \$4 };/Out4\/Block/ { b4bo = \$4 };\\\n";
 			$rrdupdatesh .= "/In6\/Pass/ { b6pi = \$4 };/Out6\/Pass/ { b6po = \$4 };/In6\/Block/ { b6bi = \$4 };/Out6\/Block/ { b6bo = \$4 };\\\n";
 			$rrdupdatesh .= "END {print b4pi \":\" b4po \":\" b4bi \":\" b4bo \":\" b6pi \":\" b6po \":\" b6bi \":\" b6bo};'`\n";
@@ -396,7 +424,7 @@ function enable_rrd_graphing() {
 				$rrdupdatesh .= " sleep 0.2\n";
 				$rrdupdatesh .= " echo \"quit\"\n";
 				$rrdupdatesh .= "}\n";
-				$rrdupdatesh .= "OVPN=`list_current_users | /usr/bin/nc -U {$g['openvpn_base']}/server{$vpnid}/sock | /usr/bin/awk -F\",\" '/^CLIENT_LIST/ {print \$2}' | /usr/bin/wc -l | /usr/bin/awk '{print $1}'`\n";
+				$rrdupdatesh .= "OVPN=`list_current_users | $nc -U {$g['openvpn_base']}/server{$vpnid}/sock | $awk -F\",\" '/^CLIENT_LIST/ {print \$2}' | $wc -l | $awk '{print $1}'`\n";
 				$rrdupdatesh .= "$rrdtool update $rrddbpath$ifname$vpnusers N:\${OVPN}\n";
 			}
 
@@ -478,7 +506,7 @@ function enable_rrd_graphing() {
 
 				/* awk function to gather shaper data */
 				/* yes, it's special */
-				$rrdupdatesh .= "` pfctl -vsq -i {$realif} | awk 'BEGIN {printf \"$rrdtool update $rrddbpath$ifname$queues \" } ";
+				$rrdupdatesh .= "` $pfctl -vsq -i {$realif} | $awk 'BEGIN {printf \"$rrdtool update $rrddbpath$ifname$queues \" } ";
 				$rrdupdatesh .= "{ ";
 				$rrdupdatesh .= "if ((\$1 == \"queue\") && ( \$2 ~ /^q/ )) { ";
 				$rrdupdatesh .= " dsname = dsname \":\" \$2 ; ";
@@ -494,7 +522,7 @@ function enable_rrd_graphing() {
 				$rrdupdatesh .= " printf \"-t \" dsname \" N:\" dsdata }' ";
 				$rrdupdatesh .= " dsname=\"\" dsdata=\"\"`\n\n";
 
-				$rrdupdatesh .= "` pfctl -vsq -i {$realif} | awk 'BEGIN {printf \"$rrdtool update $rrddbpath$ifname$queuesdrop \" } ";
+				$rrdupdatesh .= "` $pfctl -vsq -i {$realif} | $awk 'BEGIN {printf \"$rrdtool update $rrddbpath$ifname$queuesdrop \" } ";
 				$rrdupdatesh .= "{ ";
 				$rrdupdatesh .= "if ((\$1 == \"queue\") && ( \$2 ~ /^q/ )) { ";
 				$rrdupdatesh .= " dsname = dsname \":\" \$2 ; ";
@@ -533,7 +561,7 @@ function enable_rrd_graphing() {
 
 				$rrdupdatesh .= "\n";
 				$rrdupdatesh .= "# polling 3G\n";
-				$rrdupdatesh .= "GSTATS=`awk -F, 'getline 2 {print \$2 \":\" \$8 \":\" \$9}' < /tmp/3gstats.$ifname`\n";
+				$rrdupdatesh .= "GSTATS=`$awk -F, 'getline 2 {print \$2 \":\" \$8 \":\" \$9}' < /tmp/3gstats.$ifname`\n";
 				$rrdupdatesh .= "$rrdtool update $rrddbpath$ifname$cellular N:\"\$GSTATS\"";
 			}
 
@@ -566,15 +594,14 @@ function enable_rrd_graphing() {
 		}
 
 		/* the pf states gathering function. */
-		$nat_match_pattern = '\(([0-9a-f:.]|\[|\])+\) (\->|<\-)';
+		$nat_match_pattern = '\(([0-9a-f:.]|\[|\])+\) (->|<-)';
 		$rrdupdatesh .= "\n";
-		$rrdupdatesh .= "pfctl_si_out=\"` $pfctl -si > /tmp/pfctl_si_out `\"\n";
-		$rrdupdatesh .= "pfctl_ss_out=\"` $pfctl -ss > /tmp/pfctl_ss_out`\"\n";
-		$rrdupdatesh .= "pfrate=\"` cat /tmp/pfctl_si_out | egrep \"inserts|removals\" | awk '{ pfrate = \$3 + pfrate } {print pfrate}'|tail -1 `\"\n";
-		$rrdupdatesh .= "pfstates=\"` cat /tmp/pfctl_ss_out | egrep -v '{$nat_match_pattern}' | wc -l|sed 's/ //g'`\"\n";
-		$rrdupdatesh .= "pfnat=\"` cat /tmp/pfctl_ss_out | egrep '{$nat_match_pattern}' | wc -l|sed 's/ //g' `\"\n";
-		$rrdupdatesh .= "srcip=\"` cat /tmp/pfctl_ss_out | egrep -v '{$nat_match_pattern}' | grep '\\->' | awk '{print \$3}' | awk -F: '{print \$1}' | sort -u|wc -l|sed 's/ //g' `\"\n";
-		$rrdupdatesh .= "dstip=\"` cat /tmp/pfctl_ss_out | egrep -v '{$nat_match_pattern}' | grep '<\\-' | awk '{print \$3}' | awk -F: '{print \$1}' | sort -u|wc -l|sed 's/ //g' `\"\n";
+		$rrdupdatesh .= "$pfctl -ss > /tmp/pfctl_ss_out\n";
+		$rrdupdatesh .= "pfrate=\"` $pfctl -si | $egrep \"inserts|removals\" | $awk '{ pfrate = \$3 + pfrate } {print pfrate}'| $tail -1 `\"\n";
+		$rrdupdatesh .= "pfstates=\"` $egrep -v '{$nat_match_pattern}' -c /tmp/pfctl_ss_out `\"\n";
+		$rrdupdatesh .= "pfnat=\"` $egrep '{$nat_match_pattern}' -c /tmp/pfctl_ss_out `\"\n";
+		$rrdupdatesh .= "srcip=\"` $egrep -v '{$nat_match_pattern}' /tmp/pfctl_ss_out | $grep '\->' | $awk '{print \$3}' | $awk -F: '{print \$1}' | $sort -u | $wc -l | $sed 's/ //g' `\"\n";
+		$rrdupdatesh .= "dstip=\"` $egrep -v '{$nat_match_pattern}' /tmp/pfctl_ss_out | $grep '<-' | $awk '{print \$3}' | $awk -F: '{print \$1}' | $sort -u | $wc -l | $sed 's/ //g' `\"\n";
 		$rrdupdatesh .= "$rrdtool update $rrddbpath$ifname$states N:\$pfrate:\$pfstates:\$pfnat:\$srcip:\$dstip\n\n";
 
 		/* End pf states statistics */
@@ -602,9 +629,9 @@ function enable_rrd_graphing() {
 		}
 
 		/* the CPU stats gathering function. */
-		$rrdupdatesh .= "CPU=`$cpustats | cut -f1-4 -d':'`\n";
+		$rrdupdatesh .= "CPU=`$cpustats | $cut -f1-4 -d':'`\n";
 		/* Using ps uxaH will count all processes including system threads. Top was undercounting. */
-		$rrdupdatesh .= "PROCS=`ps uxaH | wc -l | awk '{print \$1;}'`\n";
+		$rrdupdatesh .= "PROCS=`$ps uxaH | $wc -l | $awk '{print \$1;}'`\n";
 		$rrdupdatesh .= "$rrdtool update $rrddbpath$ifname$proc N:\${CPU}:\${PROCS}\n";
 
 		/* End CPU statistics */
@@ -744,7 +771,7 @@ function enable_rrd_graphing() {
 		$unknown = "";
 		$rrdupdateds = "";
 		$rrdsensors = "";
-		$_gb = exec("/sbin/sysctl -q hw.acpi.thermal dev.cpu dev.t5nex dev.armada_thermal dev.cordbuc dev.pchtherm | /usr/bin/grep temperature | /usr/bin/cut -d':' -f1", $sensors_array);
+		$_gb = exec("$sysctl -q hw.acpi.thermal dev.cpu dev.t5nex dev.armada_thermal dev.cordbuc dev.pchtherm | $grep temperature | $cut -d':' -f1", $sensors_array);
 
 		if (!empty($sensors_array)) {
 			foreach ($sensors_array as $sensor) {
@@ -906,12 +933,12 @@ function enable_rrd_graphing() {
 			/* the ntp stats gathering function. */
 			$rrdupdatesh .= "\n";
 			$rrdupdatesh .= "$ntpq -c rv | $awk 'BEGIN{ RS=\",\"}{ print }' >> /tmp/ntp-rrdstats.$$\n";
-			$rrdupdatesh .= "NOFFSET=`grep offset /tmp/ntp-rrdstats.$$ | awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
-			$rrdupdatesh .= "NFREQ=`grep frequency /tmp/ntp-rrdstats.$$ | awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
-			$rrdupdatesh .= "NSJIT=`grep sys_jitter /tmp/ntp-rrdstats.$$ | awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
-			$rrdupdatesh .= "NCJIT=`grep clk_jitter /tmp/ntp-rrdstats.$$ | awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
-			$rrdupdatesh .= "NWANDER=`grep clk_wander /tmp/ntp-rrdstats.$$ | awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
-			$rrdupdatesh .= "NDISPER=`grep rootdisp /tmp/ntp-rrdstats.$$ | awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
+			$rrdupdatesh .= "NOFFSET=`$grep offset /tmp/ntp-rrdstats.$$ | $awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
+			$rrdupdatesh .= "NFREQ=`$grep frequency /tmp/ntp-rrdstats.$$ | $awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
+			$rrdupdatesh .= "NSJIT=`$grep sys_jitter /tmp/ntp-rrdstats.$$ | $awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
+			$rrdupdatesh .= "NCJIT=`$grep clk_jitter /tmp/ntp-rrdstats.$$ | $awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
+			$rrdupdatesh .= "NWANDER=`$grep clk_wander /tmp/ntp-rrdstats.$$ | $awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
+			$rrdupdatesh .= "NDISPER=`$grep rootdisp /tmp/ntp-rrdstats.$$ | $awk 'BEGIN{FS=\"=\"}{print $2}'`\n";
 			$rrdupdatesh .= "$rrdtool update $rrddbpath$ntpd \N:\${NOFFSET}:\${NSJIT}:\${NCJIT}:\${NWANDER}:\${NFREQ}:\${NDISPER}\n";
 			$rrdupdatesh .= "rm /tmp/ntp-rrdstats.$$\n";
 			$rrdupdatesh .= "\n";
@@ -976,25 +1003,25 @@ for sock in {$g['varrun_path']}/dpinger_*.sock; do
 		continue
 	fi
 
-	gw=\$(echo "\$t" | awk '{ print \$1 }')
-	delay=\$(echo "\$t" | awk '{ print \$2 }')
-	stddev=\$(echo "\$t" | awk '{ print \$3 }')
-	loss=\$(echo "\$t" | awk '{ print \$4 }')
+	gw=\$(echo "\$t" | $awk '{ print \$1 }')
+	delay=\$(echo "\$t" | $awk '{ print \$2 }')
+	stddev=\$(echo "\$t" | $awk '{ print \$3 }')
+	loss=\$(echo "\$t" | $awk '{ print \$4 }')
 
-	if echo "\$loss" | grep -Eqv '^[0-9]+\$'; then
+	if echo "\$loss" | $grep -Eqv '^[0-9]+\$'; then
 		loss="U"
 	fi
-	if echo "\$delay" | grep -Eqv '^[0-9]+\$'; then
+	if echo "\$delay" | $grep -Eqv '^[0-9]+\$'; then
 		delay="U"
 	else
 		# Convert delay from microseconds to seconds
-		delay=\$(echo "scale=7; \$delay / 1000 / 1000" | /usr/bin/bc)
+		delay=\$(echo "scale=7; \$delay / 1000 / 1000" | $bc)
 	fi
-	if echo "\$stddev" | grep -Eqv '^[0-9]+\$'; then
+	if echo "\$stddev" | $grep -Eqv '^[0-9]+\$'; then
 		stddev="U"
 	else
 		# Convert stddev from microseconds to seconds
-		stddev=\$(echo "scale=7; \$stddev / 1000 / 1000" | /usr/bin/bc)
+		stddev=\$(echo "scale=7; \$stddev / 1000 / 1000" | $bc)
 	fi
 
 	if [ ! -f {$rrddbpath}\$gw-quality.rrd ]; then
@@ -1027,15 +1054,9 @@ EOD;
 
 		unset($rrdupdatesh);
 
-		/* kill off traffic collectors */
-		kill_traffic_collector();
-
 		/* start traffic collector */
 		mwexec_bg("/usr/bin/nice -n20 /bin/sh $updaterrdscript");
 
-	} else {
-		/* kill off traffic collectors */
-		kill_traffic_collector();
 	}
 
 	$databases = glob("{$rrddbpath}/*.rrd");

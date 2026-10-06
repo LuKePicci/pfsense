@@ -43,7 +43,7 @@ $filtered_tags = array(
 	'accountkey', 'authorizedkeys', 'auth_pass',
 	'auth_server_shared_secret', 'auth_server_shared_secret2', 'auth_user',
 	'backwardsyncpassword', 'barnyard_dbpwd', 'bcrypt-hash', 'cert_key', 'community', 'crypto_password',
-	'crypto_password2', 'dns_nsupdatensupdate_key', 'ddnsdomainkey', 'encryption_password',
+	'crypto_password2', 'dns_nsupdatensupdate_key', 'ddnsdomainkey', 'device_key', 'encryption_password',
 	'etpro_code', 'etprocode', 'gold_encryption_password', 'gold_password',
 	'influx_pass', 'ipsecpsk', 'keydata', 'ldap_bindpw', 'ldapbindpass', 'ldap_pass',
 	'lighttpd_ls_password', 'maxmind_geoipdb_key', 'maxmind_key', 'md5-hash',

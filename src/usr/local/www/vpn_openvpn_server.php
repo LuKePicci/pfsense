@@ -513,6 +513,13 @@ if ($_POST['save']) {
 		}
 	}
 
+	if ($pconfig['dns_domain_enable']) {
+		if (!empty($pconfig['dns_domain']) &&
+		    !is_hostname($pconfig['dns_domain'])) {
+			$input_errors[] = gettext("DNS Default Domain must contain a valid DNS host or domain name");
+		}
+	}
+
 	if ($pconfig['dns_server_enable']) {
 		if (!empty($pconfig['dns_server1']) && !is_ipaddr(trim($pconfig['dns_server1']))) {
 			$input_errors[] = gettext("The field 'DNS Server #1' must contain a valid IPv4 or IPv6 address");
@@ -564,6 +571,10 @@ if ($_POST['save']) {
 		if (!empty($pconfig['netbios_ntype']) &&
 		    !array_key_exists($pconfig['netbios_ntype'], $netbios_nodetypes)) {
 			$input_errors[] = gettext("The selected NetBIOS Node Type is not valid.");
+		}
+		if (!empty($pconfig['netbios_scope']) &&
+		    !is_hostname($pconfig['netbios_scope'])) {
+			$input_errors[] = gettext("NetBIOS Scope ID must contain a valid DNS host or domain name");
 		}
 	}
 

@@ -52,11 +52,11 @@ function updatecopyright() {
 			curl_setopt($ch, CURLOPT_POST, true);
 			curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
 			curl_setopt($ch, CURLOPT_CONNECTTIMEOUT ,4);
+			curl_setopt($ch, CURLOPT_FORBID_REUSE, true);
 			set_curlproxy($ch);
 
 			$response = curl_exec($ch);
 			$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-			curl_close($ch);
 
 			if ($status == 200) {
 				// Save to a temporary file

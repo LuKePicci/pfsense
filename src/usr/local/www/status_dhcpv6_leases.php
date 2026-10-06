@@ -93,14 +93,23 @@ if ($_POST['cleardhcpleases']) {
 endif; /* dhcp_is_backend('isc') */
 
 if (dhcp_is_backend('kea')):
-if ($_POST['deleteip'] && is_ipaddrv6($_POST['deleteip'])) {
-	system_del_kea6lease($_POST['deleteip']);
-	header("Location: status_dhcpv6_leases.php?all={$_REQUEST['all']}");
+if ($_POST['deleteip']) {
+	$_POST['deleteip'] = trim($_POST['deleteip']);
+	if (is_ipaddrv6($_POST['deleteip'])) {
+		system_del_kea6lease($_POST['deleteip']);
+		header("Location: status_dhcpv6_leases.php?all={$_REQUEST['all']}");
+	}
 }
 
 if ($_POST['deletepd']) {
-	system_del_kea6lease($_POST['deletepd'], 'IA_PD');
-	header("Location: status_dhcpv6_leases.php?all={$_REQUEST['all']}");
+	$_POST['deletepd'] = trim($_POST['deletepd']);
+	if (is_subnetv6($_POST['deletepd'])) {
+		list($_POST['deletepd']) = explode('/', $_POST['deletepd']);
+	}
+	if (is_ipaddrv6($_POST['deletepd'])) {
+		system_del_kea6lease($_POST['deletepd'], 'IA_PD');
+		header("Location: status_dhcpv6_leases.php?all={$_REQUEST['all']}");
+	}
 }
 
 if ($_POST['cleardhcpleases']) {

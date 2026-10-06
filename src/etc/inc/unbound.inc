@@ -342,6 +342,21 @@ EOF;
 			}
 		}
 	}
+
+	// The function get_interface_ip and its IPv6 variant will return
+	// a VIP (if available) in the case that no primary address exists.
+	// This can happen for example if the interface is set to track but
+	// no IPv6 prefix was leased. If the active interface list already
+	// includes the VIP then this will result in duplicate bindings.
+	// Filter out any duplicate IP addresses.
+	foreach ($bindints as &$bindint) {
+		if (is_ipaddrv6($bindint)) {
+			$bindint = text_to_compressed_ip6($bindint);
+		}
+	}
+	unset($bindint);
+	$bindints = array_unique($bindints);
+
 	foreach ($bindints as $bindint) {
 		$bindintcfg .= "interface: {$bindint}\n";
 		if (isset($unboundcfg['enablessl'])) {

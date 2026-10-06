@@ -984,16 +984,17 @@ function alias_info_popup($alias_id, $is_system_alias = false) {
 		if ($alias['type'] == "urltable") {
 			exec("/sbin/pfctl -t {$alias['name']} -T show | wc -l", $total_entries);
 			$counter=preg_replace("/\D/", "", $total_entries[0]);
-			exec("/sbin/pfctl -t {$alias['name']} -T show | head -10002", $alias_addresses);
+			exec("/sbin/pfctl -t {$alias['name']} -T show | head -" . ALIAS_CONTENT_DISPLAY_POPUP_MAX, $alias_addresses);
 		} else {
 			$urlfn = alias_expand_urltable($alias['name']);
 			$alias_addresses = empty($urlfn) ? [] : explode("\n", file_get_contents($urlfn));
+			$alias_addresses = array_map('htmlspecialchars', $alias_addresses);
 			$counter = count($alias_addresses);
 		}
 
 		$content .= '<h5>'. htmlspecialchars($alias['url']) .'</h5><ul><li>'. implode('</li><li>', $alias_addresses) .'</li></ul>';
-		if ($counter > 10002) {
-			$content .= '<i>'. gettext("listing only first 10k items") .'</i>';
+		if ($counter > ALIAS_CONTENT_DISPLAY_POPUP_MAX) {
+			$content .= '<i>'. localize_text("Listing the first %d addresses. Visit Diagnostics > Tables for the full list.", ALIAS_CONTENT_DISPLAY_POPUP_MAX) .'</i>';
 		}
 	} else {
 		if (empty($alias['address'])) {

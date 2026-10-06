@@ -2496,13 +2496,13 @@ EOD;
 
 			$pam_sshd =<<<EOD
 # auth
-auth            sufficient      /usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
-auth		required	pam_unix.so		no_warn try_first_pass
+auth		sufficient	/usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
+auth		required	pam_unix.so			no_warn try_first_pass
 
 # account
 account		required	pam_nologin.so
 account		required	pam_login_access.so
-account         sufficient      /usr/local/lib/pam_ldap.so	ignore_authinfo_unavail ignore_unknown_user config=/var/etc/pam_ldap.conf
+account		required	/usr/local/lib/pam_ldap.so	ignore_authinfo_unavail ignore_unknown_user config=/var/etc/pam_ldap.conf
 
 # session
 session		required	/usr/local/lib/pam_mkhomedir.so	umask=0077 skel=/etc/skel/ silent
@@ -2510,29 +2510,28 @@ session		sufficient	/usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
 session		required	pam_permit.so
 
 # password
-password        sufficient      /usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
-password	required	pam_unix.so		no_warn try_first_pass
+password	sufficient	/usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
+password	required	pam_unix.so			no_warn try_first_pass
 
 EOD;
 
 			$pam_system =<<<EOD
 # auth
-auth            sufficient      /usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
-auth		required	pam_unix.so		no_warn try_first_pass
+auth		sufficient	/usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
+auth		required	pam_unix.so			no_warn try_first_pass
 
 # account
 account		required	pam_login_access.so
-account         sufficient      pam_radius.so
-account         sufficient      /usr/local/lib/pam_ldap.so	ignore_authinfo_unavail ignore_unknown_user config=/var/etc/pam_ldap.conf
+account		required	/usr/local/lib/pam_ldap.so	ignore_authinfo_unavail ignore_unknown_user config=/var/etc/pam_ldap.conf
 
 # session
 session		required	/usr/local/lib/pam_mkhomedir.so	umask=0077 skel=/etc/skel/ silent
 session		sufficient	/usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
-session		required	pam_lastlog.so		no_fail
+session		required	pam_lastlog.so			no_fail
 
 # password
-password        sufficient      /usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
-password	required	pam_unix.so		no_warn try_first_pass
+password	sufficient	/usr/local/lib/pam_ldap.so	config=/var/etc/pam_ldap.conf
+password	required	pam_unix.so			no_warn try_first_pass
 
 EOD;
 

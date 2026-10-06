@@ -50,7 +50,6 @@ if (!g_get('services_dhcp_server_enable')) {
 
 $if = $_REQUEST['if'];
 $iflist = get_configured_interface_with_descr();
-$iflist = array_merge($iflist, get_configured_pppoe_server_interfaces());
 
 /* set the starting interface */
 if (!$if || !isset($iflist[$if])) {
@@ -454,11 +453,20 @@ if (isset($_POST['apply'])) {
 
 	/* validate custom config */
 	if (dhcp_is_backend('kea')) {
-		if (!empty($_POST['custom_kea_config'])) {
-			$json = json_decode($_POST['custom_kea_config'], true);
-			if (!is_array($json) || (json_last_error() !== JSON_ERROR_NONE)) {
-				$input_errors[] = gettext('Custom configuration is not a well formed JSON object.');
+		if (dhcp_can_edit_custom_config(true)) {
+			if (!empty($_POST['custom_kea_config'])) {
+				$json = json_decode($_POST['custom_kea_config'], true);
+				if (!is_array($json) || (json_last_error() !== JSON_ERROR_NONE)) {
+					$input_errors[] = gettext('Custom configuration is not a well formed JSON object.');
+				}
 			}
+		} else {
+			$stored_custom = base64_decode(array_get_path($dhcpdconf, 'custom_kea_config', ''));
+			if (isset($_POST['custom_kea_config']) && ($_POST['custom_kea_config'] !== $stored_custom)) {
+				$input_errors[] = gettext('This user does not have sufficient privileges to edit the Custom Configuration field.');
+			}
+			/* show the stored value, not the submitted one */
+			$pconfig['custom_kea_config'] = $stored_custom;
 		}
 	}
 
@@ -581,7 +589,7 @@ if (isset($_POST['apply'])) {
 
 		$dhcpdconf['numberoptions'] = $numberoptions;
 
-		if (dhcp_is_backend('kea')) {
+		if (dhcp_is_backend('kea') && dhcp_can_edit_custom_config(true)) {
 			$dhcpdconf['custom_kea_config'] = base64_encode($_POST['custom_kea_config']);
 		}
 
@@ -614,7 +622,8 @@ if ($act == "delpool") {
 }
 
 if ($_POST['act'] == "del") {
-	if (config_get_path("dhcpdv6/{$if}/staticmap/{$_POST['id']}")) {
+	$lease_to_delete = config_get_path("dhcpdv6/{$if}/staticmap/{$_POST['id']}");
+	if ($lease_to_delete) {
 		config_del_path("dhcpdv6/{$if}/staticmap/{$_POST['id']}");
 		write_config("DHCPv6 server static map deleted");
 		if (config_path_enabled("dhcpdv6/{$if}")) {
@@ -623,6 +632,18 @@ if ($_POST['act'] == "del") {
 				mark_subsystem_dirty('hosts');
 			}
 		}
+
+		if (dhcp_is_backend('kea')) {
+			if (!function_exists('system_del_kea6lease')) {
+				require_once('system.inc');
+			}
+			if (is_ipaddrv6($lease_to_delete['ipaddrv6'])) {
+				system_del_kea6lease($lease_to_delete['ipaddrv6']);
+			} elseif (!empty($lease_to_delete['duid'])) {
+				system_del_kea6lease($lease_to_delete['duid'], get_keasubnetid_from_interface($if));
+			}
+		}
+
 		header("Location: services_dhcpv6.php?if={$if}");
 		exit;
 	}
@@ -897,7 +918,7 @@ if (is_ipaddrv6($ifcfgip)) {
 				sprintf('%s - %s%s',
 					array_get_path($range, 'from'),
 					array_get_path($range, 'to'),
-					!empty($range['descr']) ? ' ('.$range['descr'].')' : null
+					!empty($range['descr']) ? ' ('.htmlspecialchars($range['descr']).')' : null
 				)
 			));
 			$first = false;
@@ -1422,13 +1443,17 @@ endif; /* dhcp_is_backend('kea') */
 
 if (dhcp_is_backend('kea')):
 $section = new Form_Section(gettext('Custom Configuration'));
-$section->addInput(new Form_Textarea(
+$custom_config = new Form_Textarea(
 	'custom_kea_config',
 	gettext('JSON Configuration'),
 	array_get_path($pconfig, 'custom_kea_config')
-))->setWidth(8)->setHelp(gettext('JSON to be merged into the "%1$s" section of the generated Kea DHCPv6 configuration.%2$sThe input must be a well formed JSON object and should not include the "%1$s" key itself.'), $kea_section, '<br/>');
+);
+if (!dhcp_can_edit_custom_config(true)) {
+	$custom_config->setDisabled();
+}
+$section->addInput($custom_config)->setWidth(8)->setHelp(gettext('JSON to be merged into the "%1$s" section of the generated Kea DHCPv6 configuration.%2$sThe input must be a well formed JSON object and should not include the "%1$s" key itself.'), $kea_section, '<br/>');
 $form->add($section);
-endif;	
+endif;
 
 if ($act === 'newpool') {
 	$form->addGlobal(new Form_Input(

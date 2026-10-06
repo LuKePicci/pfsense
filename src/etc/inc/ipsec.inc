@@ -267,6 +267,9 @@ $p2_pfskeygroups = array(
 	32 => gettext('32 (Elliptic Curve 448, 448 bit)')
 );
 
+global $keep_alive_timeout;
+$keep_alive_timeout = 5;
+
 function ipsec_enabled() {
 	if (!is_array(config_get_path('ipsec'))) {
 		return false;
@@ -847,7 +850,8 @@ function ipsec_initiate_by_conid($type, $conid) {
 			break;
 		case 'ike':
 		case 'child':
-			mwexec_bg("/usr/local/sbin/swanctl --initiate --timeout 5 " . escapeshellarg('--' . $type) . " " . escapeshellarg($conid));
+			global $keep_alive_timeout;
+			mwexec_bg("/usr/local/sbin/swanctl --initiate --timeout {$keep_alive_timeout} " . escapeshellarg('--' . $type) . " " . escapeshellarg($conid));
 			break;
 		default:
 			/* Do nothing. Invalid type. */
@@ -3466,6 +3470,115 @@ function delete_p1_and_children($p1list = []) {
 	/* Return the total number of entries removed. */
 	return count($delp1ids) + count($delp2ids);
 
+}
+
+/**
+ * Refresh the gateway monitoring status for IPsec VTI gateways with
+ * a pending status.
+ * @param string|array[string] $interface The VTI(s) to check.
+ * @param int|null $address_family Limit gateway refresh to an IP address family.
+ */
+function ipsec_refresh_vti_gateway(string|array $interface, int|null $address_family = null) {
+	if (is_string($interface)) {
+		$interfaces[$interface] = true;
+	} elseif (array_is_list($interface)) {
+		$interfaces = array_flip($interface);
+	} else {
+		return;
+	}
+
+	foreach (get_gateways() as $gateway) {
+		if (!isset($interfaces[$gateway['interface']])) {
+			continue;
+		}
+		if ((($address_family == AF_INET) && ($gateway['ipprotocol'] != "inet")) ||
+		    (($address_family == AF_INET6) && ($gateway['ipprotocol'] != "inet6"))) {
+			continue;
+		}
+		if (get_gateway_status($gateway['name'])[0] == GW_STATUS_UNKNOWN) {
+			if (!set_dpinger_gateway_array($gateway)) {
+				continue;
+			}
+			logger(LOG_INFO, localize_text("Refreshing gateway status for %s", $gateway['name']), LOG_PREFIX_IPSEC);
+			start_dpinger($gateway);
+		}
+	}
+}
+
+function ipsec_refresh_tunnels() {
+	/* List of P2 conids we want to initiate */
+	$initiate = array();
+
+	/* Check all P2s for keepalive setting */
+	foreach (config_get_path('ipsec/phase2', []) as $p2) {
+		/* If enabled, form conid and store in list */
+		if ($p2['keepalive'] == 'enabled') {
+			$initiate[] = ipsec_conid(null, $p2);
+		}
+	}
+
+	/* If the list is empty, nothing to do, so bail */
+	if (empty($initiate)) {
+		if (g_get('debug')) {
+			echo "No tunnels marked keepalive.\n";
+		}
+		return false;
+	}
+
+	/* Fetch IPsec status */
+	$status = ipsec_status();
+
+	/* Remove duplicates which may happen if multiple un-split IKEv2 P2s on the same
+	* P1 have the Keep Alive option enabled. */
+	$initiate = array_unique($initiate);
+
+	/* get gateway groups array */
+	$a_groups = return_gateway_groups_array(true);
+
+	/* Check each connected entry to see if the one we want is enabled */
+	$vti_names = [];
+	$initiated = false;
+	foreach ($initiate as $conid) {
+		if (g_get('debug')) {
+			echo "Checking {$conid}.\n";
+		}
+		list($ikeid, $reqid) = ipsec_id_by_conid($conid);
+		$vti_names[] = ipsec_get_ifname($status[$ikeid]['p1'], $reqid);
+		if (is_array($status['disconnected']) &&
+		    is_array($status['disconnected']['p2']) &&
+		    in_array($conid, $status['disconnected']['p2'])) {
+			/* Check if P1 is using a CARP VIP. If so, check CARP status. */
+			if (((substr($status[$ikeid]['p1']['interface'], 0, 4) == "_vip") &&
+			    in_array(get_carp_bind_status($status[$ikeid]['p1']['interface']), array('BACKUP', 'INIT'))) ||
+			    (is_array($a_groups[$status[$ikeid]['p1']['interface']]) &&
+			    !empty($a_groups[$status[$ikeid]['p1']['interface']][0]['vip']) &&
+			    in_array(get_carp_bind_status($a_groups[$status[$ikeid]['p1']['interface']][0]['vip']), array('BACKUP', 'INIT')))) {
+				if (g_get('debug')) {
+					echo "{$conid} is disconnected but using a CARP VIP in BACKUP or INIT status. Skipping.\n";
+				}
+				continue;
+			}
+			if (g_get('debug')) {
+				echo "{$conid} is disconnected. Attempting to initiate.\n";
+			}
+			ipsec_initiate_by_conid('child', $conid);
+			$initiated = true;
+		} elseif (g_get('debug')) {
+			echo "{$conid} is already connected.\n";
+		}
+	}
+
+	/* The VTI gateway is unknown when an FQDN remote peer is unresolvable
+	 * during interface/tunnel setup. Once resolvable the tunnel may come
+	 * up without triggering an interface event which is necessary for
+	 * properly handling gateway monitoring. Check for this case and try to
+	 * fix the gateway monitoring. */
+	if ($initiated) {
+		/* Give strongswan some time to bring up the tunnels. */
+		global $keep_alive_timeout;
+		sleep($keep_alive_timeout);
+	}
+	ipsec_refresh_vti_gateway($vti_names);
 }
 
 ?>

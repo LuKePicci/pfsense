@@ -560,7 +560,7 @@ function installer_add_vlan($dev, $if, $descr, $tag, $pcp) {
 		return (-1);
 	}
 
-	/* Delete the VLAN is already present. */
+	/* Delete the VLAN if already present. */
 	$vlans = config_get_path('vlans/vlan', []);
 	$vlans = array_filter($vlans, function($vlan) use ($dev, $tag) {
 		if ($vlan['tag'] == $tag && $vlan['if'] == $dev) {

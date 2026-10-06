@@ -1319,6 +1319,7 @@ function openvpn_reconfigure($mode, $settings) {
 	// Write the settings for the keys
 	switch ($settings['mode']) {
 		case 'p2p_shared_key':
+			$conf .= "allow-deprecated-insecure-static-crypto\n";
 			openvpn_add_keyfile($settings['shared_key'], $conf, $mode_id, "secret");
 			break;
 		case 'p2p_tls':
@@ -1629,7 +1630,7 @@ function openvpn_restart($mode, $settings) {
 	/* start the new process */
 	$fpath = "{$g['openvpn_base']}/{$mode_id}/config.ovpn";
 	openvpn_clear_route($mode, $settings);
-	$res = mwexec("/usr/local/sbin/openvpn --config " . escapeshellarg($fpath));
+	$res = mwexec("/usr/local/sbin/openvpn --config " . escapeshellarg($fpath), LOG_ERR);
 	if ($res == 0) {
 		$i = 0;
 		$pfile = g_get('varrun_path')."/openvpn_{$mode_id}.pid";
@@ -1919,11 +1920,14 @@ function openvpn_resync_all($interface = "", $protocol = "", $force = false) {
 			$ip_change = ($interface === "") ||
 			    ($interface === $settings['interface']);
 
-			if (!$ip_change && file_exists($fpath)) {
-				$gw_group_change =
-				    (trim(file_get_contents($fpath), " \t\n") !=
-				    get_failover_interface(
-					$settings['interface']));
+			if (!$ip_change) {
+				$realif = get_failover_interface($settings['interface']);
+				if (file_exists($fpath) && interface_gateway_group_member($realif, $settings['interface'])) {
+					$gw_group_change = (trim(file_get_contents($fpath), " \t\n") != $realif);
+				} else {
+					// Interface is not used for this OpenVPN config.
+					continue;
+				}
 			}
 
 			if ($force || $ip_change || $gw_group_change) {

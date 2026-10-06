@@ -216,10 +216,16 @@ function saveSystemAdvancedMisc($post, $json = false) {
 		$input_errors[] = gettext("Proxy URL must be a valid IP address or FQDN.");
 	}
 
+	if (preg_match('("|:|`|;|\r|\n)', $post['proxyuser']) === 1) {
+		$input_errors[] = gettext("Invalid proxy username.");
+	}
 	if (!empty($post['proxyuser']) && empty($post['proxypass'])) {
 		$input_errors[] = gettext("A proxy password must be set when specifying a proxy username.");
 	}
 
+	if (preg_match('("|;|`|\r|\n)', $post['proxypass']) === 1) {
+		$input_errors[] = gettext("Invalid proxy password.");
+	}
 	if ($post['proxypass'] != $post['proxypass_confirm']) {
 		$input_errors[] = gettext("Proxy password and confirmation must match.");
 	}

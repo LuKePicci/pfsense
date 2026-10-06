@@ -55,7 +55,7 @@ a:hover {
     text-decoration: none;
 }
 
-a.fa-solid, i.fa-solid, a.fa-regular, i.fa-regular, a.fa-brands, i.fa-brands {
+*:not(.fa-stack) > a.fa-solid, *:not(.fa-stack) > i.fa-solid, *:not(.fa-stack) > a.fa-regular, *:not(.fa-stack) > i.fa-regular, *:not(.fa-stack) > a.fa-brands, *:not(.fa-stack) > i.fa-brands {
     font-size: 18px;
 }
 

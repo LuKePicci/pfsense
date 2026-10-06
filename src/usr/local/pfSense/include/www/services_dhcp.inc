@@ -24,6 +24,28 @@ require_once('util.inc');
 require_once('interfaces.inc');
 require_once('pfsense-utils.inc');
 
+/* custom config can run commands as root, so it has its own privilege */
+function dhcp_can_edit_custom_config(bool $v6 = false): bool {
+	$user_entry = getUserEntry($_SESSION['Username']);
+	$user_entry = $user_entry['item'];
+	$priv = $v6 ? 'page-services-dhcpv6server-custom'
+		    : 'page-services-dhcpserver-custom';
+
+	return (isAdminUID($_SESSION['Username']) ||
+	    userHasPrivilege($user_entry, $priv) ||
+	    userHasPrivilege($user_entry, 'page-all'));
+}
+
+function kea_log_levels() {
+	return [
+		'DEBUG' => gettext('Debug'),
+		'INFO' => gettext('Info'),
+		'WARN' => gettext('Warn'),
+		'ERROR' => gettext('Error'),
+		'FATAL' => gettext('Fatal')
+	];
+}
+
 function kea_defaults(string $key): int|string {
 	/* throws an exception if $key isn't matched */
 	return (match($key) {
@@ -284,6 +306,14 @@ function dhcp_ha_status_icon($where, $server) {
 function dhcp_validate_settings_post(array $pconfig): array {
 	$input_errors = [];
 
+	/* validate logging */
+	if (isset($pconfig['loglevel']) && !array_key_exists($pconfig['loglevel'], kea_log_levels())) {
+		$input_errors[] = gettext('Invalid log level.');
+	}
+	if (isset($pconfig['loglevel_leases']) && !array_key_exists($pconfig['loglevel_leases'], kea_log_levels())) {
+		$input_errors[] = gettext('Invalid log level for leases.');
+	}
+
 	/* validate local name */
 	$localname = trim(array_get_path($pconfig, 'ha/localname'));
 	if (!(empty($localname) || is_hostname($localname))) {
@@ -341,6 +371,17 @@ function dhcp_validate_settings_post(array $pconfig): array {
 
 function dhcp_do_settings_post(): array {
 	$pconfig = $old_config = config_get_path('kea', []);
+
+	if (isset($_POST['loglevel']) && ($_POST['loglevel'] != 'default')) {
+		array_set_path($pconfig, 'loglevel', $_POST['loglevel']);
+	} else {
+		array_del_path($pconfig, 'loglevel');
+	}
+	if (isset($_POST['loglevel_leases']) && ($_POST['loglevel_leases'] != 'default')) {
+		array_set_path($pconfig, 'loglevel_leases', $_POST['loglevel_leases']);
+	} else {
+		array_del_path($pconfig, 'loglevel_leases');
+	}
 
 	/* normalize these fields so that changes comparison below works properly */
 	foreach ([
@@ -413,10 +454,24 @@ function dhcp_do_settings_post(): array {
 		}
 	}
 
-	if (!empty($_POST['custom_kea_config'])) {
-		array_set_path($pconfig, 'custom_kea_config', base64_encode($_POST['custom_kea_config']));
+	$custom_priv_error = false;
+	if (dhcp_can_edit_custom_config()) {
+		if (!empty($_POST['custom_kea_config'])) {
+			array_set_path($pconfig, 'custom_kea_config', base64_encode($_POST['custom_kea_config']));
+		} else {
+			array_del_path($pconfig, 'custom_kea_config');
+		}
 	} else {
-		array_del_path($pconfig, 'custom_kea_config');
+		$old_custom = base64_decode(array_get_path($old_config, 'custom_kea_config', ''));
+		if (isset($_POST['custom_kea_config']) && ($_POST['custom_kea_config'] !== $old_custom)) {
+			$custom_priv_error = true;
+		}
+		/* preserve stored value */
+		if (!empty($old_custom)) {
+			array_set_path($pconfig, 'custom_kea_config', base64_encode($old_custom));
+		} else {
+			array_del_path($pconfig, 'custom_kea_config');
+		}
 	}
 
 	/* don't leave empty ha config section */
@@ -425,6 +480,9 @@ function dhcp_do_settings_post(): array {
 	}
 
 	$input_errors = dhcp_validate_settings_post($pconfig);
+	if ($custom_priv_error) {
+		$input_errors[] = gettext('This user does not have sufficient privileges to edit the Custom Configuration field.');
+	}
 	if (!$input_errors && ($pconfig !== $old_config)) {
 		config_set_path('kea', $pconfig);
 		write_config(gettext('DHCP Server - Settings changed'));
@@ -438,6 +496,17 @@ function dhcp_do_settings_post(): array {
 
 function dhcp6_do_settings_post(): array {
 	$pconfig = $old_config = config_get_path('kea6', []);
+
+	if (isset($_POST['loglevel']) && ($_POST['loglevel'] != 'default')) {
+		array_set_path($pconfig, 'loglevel', $_POST['loglevel']);
+	} else {
+		array_del_path($pconfig, 'loglevel');
+	}
+	if (isset($_POST['loglevel_leases']) && ($_POST['loglevel_leases'] != 'default')) {
+		array_set_path($pconfig, 'loglevel_leases', $_POST['loglevel_leases']);
+	} else {
+		array_del_path($pconfig, 'loglevel_leases');
+	}
 
 	/* normalize these fields so that changes comparison below works properly */
 	foreach ([
@@ -510,10 +579,24 @@ function dhcp6_do_settings_post(): array {
 		}
 	}
 
-	if (!empty($_POST['custom_kea_config'])) {
-		array_set_path($pconfig, 'custom_kea_config', base64_encode($_POST['custom_kea_config']));
+	$custom_priv_error = false;
+	if (dhcp_can_edit_custom_config(true)) {
+		if (!empty($_POST['custom_kea_config'])) {
+			array_set_path($pconfig, 'custom_kea_config', base64_encode($_POST['custom_kea_config']));
+		} else {
+			array_del_path($pconfig, 'custom_kea_config');
+		}
 	} else {
-		array_del_path($pconfig, 'custom_kea_config');
+		$old_custom = base64_decode(array_get_path($old_config, 'custom_kea_config', ''));
+		if (isset($_POST['custom_kea_config']) && ($_POST['custom_kea_config'] !== $old_custom)) {
+			$custom_priv_error = true;
+		}
+		/* preserve stored value */
+		if (!empty($old_custom)) {
+			array_set_path($pconfig, 'custom_kea_config', base64_encode($old_custom));
+		} else {
+			array_del_path($pconfig, 'custom_kea_config');
+		}
 	}
 
 	/* don't leave empty ha config section */
@@ -522,6 +605,9 @@ function dhcp6_do_settings_post(): array {
 	}
 
 	$input_errors = dhcp_validate_settings_post($pconfig);
+	if ($custom_priv_error) {
+		$input_errors[] = gettext('This user does not have sufficient privileges to edit the Custom Configuration field.');
+	}
 	if (!$input_errors && ($pconfig !== $old_config)) {
 		config_set_path('kea6', $pconfig);
 		write_config(gettext('DHCPv6 Server - Settings changed'));

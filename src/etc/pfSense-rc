@@ -676,12 +676,12 @@ if [ -z "$skip_packages" ]; then
 	"/usr/local/sbin/${product_name}-upgrade" -y -U -b 3
 fi
 
+# Update pkg metadata
+/etc/rc.update_pkg_metadata now
+
 # Start packages
 [ -z "$skip_packages" ] \
 	&& /usr/local/sbin/fcgicli -f /etc/rc.start_packages
-
-# Update pkg metadata
-/etc/rc.update_pkg_metadata now
 
 # Reset the cache.  read-only requires this.
 /bin/rm -f /tmp/config.cache

@@ -355,23 +355,32 @@ $section->addInput(new Form_Select(
 	$priority_modes
 ))->setHelp(gettext('Select the Priority for the RA Daemon.'));
 
-$carplist = get_configured_vip_list("inet6", VIP_CARP);
+$viplist = get_configured_vip_list("inet6");
 
-$carplistif = array();
+$viplistif = array();
 
-if (count($carplist) > 0) {
-	foreach ($carplist as $ifname => $vip) {
-		if (get_configured_vip_interface($ifname) == $if) {
-			$carplistif[$ifname] = $vip;
+if (count($viplist) > 0) {
+	foreach ($viplist as $ifname => $vip) {
+		$parentinterface = get_configured_vip_interface($ifname);
+		if (substr($parentinterface, 0, 4) == "_vip") {
+			// IP Alias VIP with CARP parent.
+			$parentinterface = get_configured_vip_interface($parentinterface);
+		}
+		if ($parentinterface == $if) {
+			$viplistif[$ifname] = $vip;
 		}
 	}
 }
 
-if (count($carplistif) > 0) {
+if (count($viplistif) > 0) {
 	$iflist = array();
 
 	$iflist['interface'] = convert_friendly_interface_to_friendly_descr($if);
-	foreach ($carplistif as $ifname => $vip) {
+	foreach ($viplistif as $ifname => $vip) {
+		// Show only LLAs.
+		if (!is_linklocal($vip)) {
+			continue;
+		}
 		$iflist[$ifname] = get_vip_descr($vip) . " - " . $vip;
 	}
 

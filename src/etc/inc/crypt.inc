@@ -32,6 +32,7 @@ define('PFS_OPENSSL_DEFAULT_ITERATIONS', '500000');
 		unlink_if_exists($file);
 		unlink_if_exists("{$file}.dec");
 		unlink_if_exists("{$file}.enc");
+		unlink_if_exists("{$file}.pass");
 	}
 
 	function crypt_data($val, $pass, $opt, $legacy = false, $iterations = PFS_OPENSSL_DEFAULT_ITERATIONS) {
@@ -39,7 +40,13 @@ define('PFS_OPENSSL_DEFAULT_ITERATIONS', '500000');
 		/* Ensure the files do not already exist */
 
 		crypt_cleanup($file);
+		/* Do not use PHP umask() as it can affect all threads */
+		touch("{$file}.dec");
+		chmod("{$file}.dec", 0600);
 		file_put_contents("{$file}.dec", $val);
+		touch("{$file}.pass");
+		chmod("{$file}.pass", 0600);
+		file_put_contents("{$file}.pass", $pass);
 
 		/* Use PBKDF2 Key Derivation (https://en.wikipedia.org/wiki/PBKDF2)
 		 *  unless we need to read old data encrypted without it. */
@@ -49,7 +56,7 @@ define('PFS_OPENSSL_DEFAULT_ITERATIONS', '500000');
 
 		$output = "";
 		$exitcode = "";
-		exec("/usr/bin/openssl enc {$opt} -aes-256-cbc -in {$file}.dec -out {$file}.enc -pass pass:" . escapeshellarg($pass) . " -salt -md {$md} {$keyder} {$iter} 2> /dev/null", $output, $exitcode);
+		exec("umask 0077; /usr/bin/openssl enc {$opt} -aes-256-cbc -in {$file}.dec -out {$file}.enc -pass file:{$file}.pass -salt -md {$md} {$keyder} {$iter} 2> /dev/null", $output, $exitcode);
 
 		if (($exitcode == 0) && file_exists("{$file}.enc") && (filesize("{$file}.enc") > 0)) {
 			$result = file_get_contents("{$file}.enc");

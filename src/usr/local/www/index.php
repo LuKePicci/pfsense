@@ -83,6 +83,7 @@ while (($filename = readdir($dirhandle)) !== false) {
 }
 
 ##build list of widgets
+global $known_widgets;
 foreach (glob("/usr/local/www/widgets/widgets/*.widget.php") as $file) {
 	$basename = basename($file, '.widget.php');
 	// Get the widget title that should be in a var defined in the widget's inc file.
@@ -107,8 +108,49 @@ if (!is_array($user_settings['widgets'])) {
 	$user_settings['widgets'] = array();
 }
 
-if ($_POST && $_POST['sequence']) {
+function validate_widget($widgetdata, $allownext = true) {
+	global $known_widgets;
+	list($basename, $col, $display, $widget_counter) = explode(':', $widgetdata);
 
+	/* Check if widget is valid, skip if it is unknown */
+	if (!in_array($basename, array_column($known_widgets, 'basename'))) {
+		return false;
+	}
+
+	/* Validate column specification.
+	 * must be 'colX' where X is a positive integer.
+	 */
+	if ((substr($col, 0, 3) !== 'col') ||
+	    !is_numericint(substr($col, 3)) ||
+	     (intval(substr($col, 3)) < 1)) {
+		return false;
+	}
+
+	/* Validate display, must be one of 'open' or 'close'
+	 * 'show' should also be allowed for historical reasons.
+	 */
+	if (!in_array($display, ['open', 'show', 'close'])) {
+		return false;
+	}
+
+	/* Validate widget counter.
+	 * Must be an integer 0 or greater or the string 'next' if allowed
+	 */
+	if (!is_null($widget_counter)) {
+		if (is_numeric($widget_counter)) {
+			if (intval($widget_counter) < 0) {
+				return false;
+			}
+		} elseif (!$allownext ||
+			  ($widget_counter != 'next')) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+if ($_POST && $_POST['sequence']) {
 	// Start with the user's widget settings.
 	$widget_settings = $user_settings['widgets'];
 
@@ -119,21 +161,29 @@ if ($_POST && $_POST['sequence']) {
 
 	// Make a record of the counter of each widget that is in use.
 	foreach ($widget_seq_array as $widget_seq_data) {
+		if (!validate_widget($widget_seq_data)) {
+			continue;
+		}
 		list($basename, $col, $display, $widget_counter) = explode(':', $widget_seq_data);
+		$basename = basename($basename);
 
 		if ($widget_counter != 'next') {
 			if (!is_numeric($widget_counter)) {
 				continue;
 			}
 			$widget_counter_array[$basename][$widget_counter] = true;
-			$widget_sequence .= $widget_sep . $widget_seq_data;
+			$widget_sequence .= $widget_sep . implode(':', [$basename, $col, $display, $widget_counter]);
 			$widget_sep = ',';
 		}
 	}
 
 	// Find any new entry (and do not assume there is only 1 new entry)
 	foreach ($widget_seq_array as $widget_seq_data) {
+		if (!validate_widget($widget_seq_data)) {
+			continue;
+		}
 		list($basename, $col, $display, $widget_counter) = explode(':', $widget_seq_data);
+		$basename = basename($basename);
 
 		if ($widget_counter == 'next') {
 			// Construct the widget counter of the new widget instance by finding
@@ -149,8 +199,8 @@ if ($_POST && $_POST['sequence']) {
 				$instance_num++;
 			}
 
-			$widget_sequence .= $widget_sep . $basename . ':' . $col . ':' . $display . ':' . $instance_num;
 			$widget_counter_array[$basename][$instance_num] = true;
+			$widget_sequence .= $widget_sep . implode(':', [$basename, $col, $display, $instance_num]);
 			$widget_sep = ',';
 		}
 	}
@@ -226,7 +276,9 @@ if ($user_settings['widgets']['sequence'] != "") {
 		}
 
 		list($basename, $col, $display, $copynum) = $line_items;
-		if (!is_numeric($copynum)) {
+		$basename = basename($basename);
+
+		if (!validate_widget($line, false)) {
 			continue;
 		}
 
@@ -332,6 +384,7 @@ $available = $known_widgets;
 uasort($available, function($a, $b){ return strcasecmp($a['title'], $b['title']); });
 
 foreach ($available as $widgetconfig):
+	$widgetconfig['basename'] = basename($widgetconfig['basename']);
 	// If the widget supports multiple copies, or no copies are displayed yet, then it is available to add
 	if (($widgetconfig['multicopy']) || ($widgetconfig['display'] == 'none')):
 ?>
@@ -380,6 +433,7 @@ foreach ($widgets as $widgetkey => $widgetconfig) {
 			foreach ($columnWidgets as $widgetkey => $widgetconfig) {
 				// Construct some standard names for the ids this widget will use for its commonly-used elements.
 				// Included widget.php code can rely on and use these, so the format does not have to be repeated in every widget.php
+				$widgetconfig['basename'] = basename($widgetconfig['basename']);
 				$widget_panel_body_id = 'widget-' . $widgetkey . '_panel-body';
 				$widget_panel_footer_id = 'widget-' . $widgetkey . '_panel-footer';
 				$widget_showallnone_id = 'widget-' . $widgetkey . '_showallnone';

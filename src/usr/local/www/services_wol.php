@@ -45,7 +45,7 @@ function send_wol($if, $mac, $description, & $savemsg, & $class) {
 	/* determine broadcast address */
 	$bcip = gen_subnet_max($ipaddr, get_interface_subnet($if));
 	/* Execute wol command and check return code. */
-	if (!mwexec("/usr/local/bin/wol -i {$bcip} {$mac}")) {
+	if (!mwexec("/usr/local/bin/wol -i {$bcip} {$mac}", LOG_ERR)) {
 		$savemsg .= sprintf(gettext('Sent magic packet to %1$s%2$s.'), $mac, $description) . "<br />";
 		$class = 'success';
 	} else {
@@ -57,7 +57,7 @@ function send_wol($if, $mac, $description, & $savemsg, & $class) {
 $savemsg = "";
 $class = "";
 
-if ($_REQUEST['wakeall'] != "") {
+if ($_POST['wakeall'] != "") {
 	foreach (config_get_path('wol/wolentry', []) as $wolent) {
 		send_wol($wolent['interface'], $wolent['mac'], $wolent['descr'], $savemsg, $class);
 	}
@@ -69,7 +69,7 @@ if ($_POST['Submit'] || $_POST['mac']) {
 
 	if ($_POST['mac']) {
 		/* normalize MAC addresses - lowercase and convert Windows-ized hyphenated MACs to colon delimited */
-		$mac = strtolower(str_replace("-", ":", $_POST['mac']));
+		$mac = strtolower(str_replace("-", ":", urldecode($_POST['mac'])));
 		$if = $_POST['if'];
 	}
 
@@ -167,7 +167,7 @@ print $form;
 			<?=gettext("Add");?>
 		</a>
 
-		<a href="services_wol.php?wakeall=true" role="button" class="btn btn-primary">
+		<a href="services_wol.php?wakeall=true" role="button" class="btn btn-primary do-confirm" usepost>
 			<i class="fa-solid fa-power-off icon-embed-btn"></i>
 			<?=gettext("Wake All Devices")?>
 		</a>
@@ -193,7 +193,7 @@ print $form;
 								<?=htmlspecialchars(convert_friendly_interface_to_friendly_descr($wolent['interface']));?>
 							</td>
 							<td>
-								<a href="?mac=<?=$wolent['mac'];?>&amp;if=<?=urlencode($wolent['interface']);?>" usepost><?=strtolower($wolent['mac']);?></a>
+								<a href="?mac=<?=urlencode($wolent['mac']);?>&amp;if=<?=urlencode($wolent['interface']);?>" usepost><?=strtolower($wolent['mac']);?></a>
 							</td>
 							<td>
 								<?=htmlspecialchars($wolent['descr']);?>
@@ -201,7 +201,7 @@ print $form;
 							<td>
 								<a class="fa-solid fa-pencil"	title="<?=gettext('Edit Device')?>"	href="services_wol_edit.php?id=<?=$i?>"></a>
 								<a class="fa-solid fa-trash-can"	title="<?=gettext('Delete Device')?>" href="services_wol.php?act=del&amp;id=<?=$i?>" usepost></a>
-								<a class="fa-solid fa-power-off" title="<?=gettext('Wake Device')?>" href="?mac=<?=$wolent['mac'];?>&amp;if=<?=urlencode($wolent['interface']);?>" usepost></a>
+								<a class="fa-solid fa-power-off" title="<?=gettext('Wake Device')?>" href="?mac=<?=urlencode($wolent['mac']);?>&amp;if=<?=urlencode($wolent['interface']);?>" usepost></a>
 							</td>
 						</tr>
 					<?php endforeach?>
@@ -215,27 +215,11 @@ print $form;
 			<?=gettext("Add");?>
 		</a>
 
-		<button id="wakeall" class="btn btn-primary">
+		<a href="services_wol.php?wakeall=true" role="button" class="btn btn-primary do-confirm" usepost>
 			<i class="fa-solid fa-power-off icon-embed-btn"></i>
 			<?=gettext("Wake All Devices")?>
-		</button>
+		</a>
 	</div>
 </div>
-
-<script type="text/javascript">
-//<![CDATA[
-events.push(function() {
-
-	$('#wakeall').click(function() {
-		if (confirm("Are you sure you wish to Wake All Devices?")) {
-			postSubmit({wakeall: 'true'}, 'services_wol.php');
-		}
-	});
-
-});
-//]]>
-</script>
-
 <?php
-
 include("foot.inc");

@@ -25,6 +25,7 @@
 ##|*IDENT=page-services-captiveportal-hasync
 ##|*NAME=Services: Captive Portal HA
 ##|*DESCR=Allow access to the 'Services: Captive Portal High Availability' page.
+##|*WARN=standard-warning-root
 ##|*MATCH=services_captiveportal_hasync.php*
 ##|-PRIV
 
@@ -188,7 +189,7 @@ $section->addInput(new Form_Checkbox(
 	$pconfig['enablebackwardsync']
 	))->setHelp('The XMLRPC sync provided by %1$s in <a href="/system_hasync.php">High Availability</a> settings only synchronize a secondary node to its primary node.'.
 	'This checkbox enable a backward sync from the secondary to the primary, in order to have a bi-directional synchronization.%1$s'.
-	'The purpose of this feature is to keep connected users synchronized between servers even if a node does down, thus providing redundancy for the captive portal zone.%2$s%2$s'.
+	'The purpose of this feature is to keep connected users synchronized between servers even if a node goes down, thus providing redundancy for the captive portal zone.%2$s%2$s'.
 	'<b>Important: these settings should be set on the secondary node only ! Do not update these settings if this %1$s is the primary node !</b>', g_get('product_label'), '<br />');
 
 $section->addInput(new Form_IpAddress(

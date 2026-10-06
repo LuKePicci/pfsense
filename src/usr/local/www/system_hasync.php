@@ -25,6 +25,7 @@
 ##|*IDENT=page-system-hasync
 ##|*NAME=System: High Availability Sync
 ##|*DESCR=Allow access to the 'System: High Availability Sync' page.
+##|*WARN=standard-warning-root
 ##|*MATCH=system_hasync.php*
 ##|-PRIV
 

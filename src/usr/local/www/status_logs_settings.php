@@ -402,7 +402,7 @@ $section->addInput(new Form_Checkbox(
 	null,
 	'Packets blocked due to IP options',
 	$pconfig['logipoptions']
-))->setHelp('Log packets that are %1$sblocked%2$s due to unmatched IP options in "pass" rules.', '<strong>', '</strong>');
+))->setHelp('Log packets that are %1$sblocked%2$s due to IP options in "pass" rules.', '<strong>', '</strong>');
 
 $section->addInput(new Form_Checkbox(
 	'logdefaultblock',

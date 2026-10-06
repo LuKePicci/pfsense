@@ -1185,6 +1185,7 @@ function captiveportal_get_last_activity($ip) {
 /* part of this code from php.net */
 function captiveportal_logportalauth($user, $mac, $ip, $status, $message = null) {
 	// Log it
+	$user = cleanup_invalid_username($user);
 	if (!$message) {
 		$message = "{$status}: {$user}, {$mac}, {$ip}";
 	} else {
@@ -1806,7 +1807,7 @@ function portal_hostname_from_client_ip($cliip) {
 		$listenporthttp = $cpcfg['listenporthttp'] ? $cpcfg['listenporthttp'] : ($cpcfg['zoneid'] + 8000);
 		$ifip = portal_ip_from_client_ip($cliip);
 		if (!$ifip) {
-			$ourhostname = config_get_path('system/hostname') . config_get_path('system/domain');
+			$ourhostname = config_get_path('system/hostname') . '.' . config_get_path('system/domain');
 		} else {
 			$ourhostname = (is_ipaddrv6($ifip)) ? "[{$ifip}]" : "{$ifip}";
 		}

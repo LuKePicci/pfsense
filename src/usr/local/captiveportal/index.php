@@ -230,21 +230,25 @@ if ($_POST['logout_id']) {
 	}
 
 } elseif ($_POST['accept'] || $cpcfg['auth_method'] === 'radmac') {
-	
-		if ($cpcfg['auth_method'] === 'radmac' && !isset($_POST['accept'])) {
-			$user = $clientmac; 
-			$passwd = $cpcfg['radmac_secret'];
-			$context = 'radmac'; // Radius MAC authentication
-		} elseif (!empty(trim($_POST['auth_user2']))) { 
-			$user = trim($_POST['auth_user2']);
-			$passwd = $_POST['auth_pass2'];
-			$context = 'second'; // Assume users to use the first context if auth_user2 is empty/does not exist
-		} else {
-			$user = trim($_POST['auth_user']);
-			$passwd = $_POST['auth_pass'];
-			$context = 'first';
-		}
-	
+
+	if ($cpcfg['auth_method'] == 'none') {
+		$user = '';
+		$passwd = '';
+		$context = 'none';
+	} elseif ($cpcfg['auth_method'] === 'radmac' && !isset($_POST['accept'])) {
+		$user = $clientmac;
+		$passwd = $cpcfg['radmac_secret'];
+		$context = 'radmac'; // Radius MAC authentication
+	} elseif (!empty(trim($_POST['auth_user2']))) {
+		$user = trim($_POST['auth_user2']);
+		$passwd = $_POST['auth_pass2'];
+		$context = 'second'; // Assume users to use the first context if auth_user2 is empty/does not exist
+	} else {
+		$user = trim($_POST['auth_user']);
+		$passwd = $_POST['auth_pass'];
+		$context = 'first';
+	}
+
 	$pipeno = captiveportal_get_next_dn_ruleno('auth', 2000, 64500, true);
 	/* if the pool is empty, return appropriate message and exit */
 	if (is_null($pipeno)) {
@@ -257,28 +261,28 @@ if ($_POST['logout_id']) {
 			portal_reply_page($redirurl, "error", $replymsg, $clientmac, $clientip);
 		}
 		logger(LOG_WARNING, localize_text("Zone: %s - Captive Portal has reached maximum login capacity", $cpzone), LOG_PREFIX_CAPTIVEPORTAL);
-		
+
 	}
-	
+
 	$auth_result = captiveportal_authenticate_user($user, $passwd, $clientmac, $clientip, $pipeno, $context);
-	
+
 	if ($auth_result['result']) {
 		captiveportal_logportalauth($user, $clientmac, $clientip, $auth_result['login_status']);
 		portal_allow($clientip, $clientmac, $user, $passwd, $redirurl, $auth_result['attributes'], null, $auth_result['auth_method'], $context);
 	} else {
 		$type = "error";
-			
+
 		if (is_URL($auth_result['attributes']['url_redirection'], true)) {
 			$redirurl = $auth_result['attributes']['url_redirection'];
 			$type = "redir";
 		}
-		
+
 		if ($auth_result['login_message']) {
 			$replymsg = $auth_result['login_message'];
 		} else {
 			$replymsg = gettext("Invalid credentials specified.");
 		}
-		
+
 		captiveportal_logportalauth($user, $clientmac, $clientip, $auth_result['login_status'], $replymsg);
 
 		/* Radius MAC authentication. */

@@ -57,10 +57,6 @@ $pconfig['pollport'] = config_get_path('snmpd/pollport');
 $pconfig['syslocation'] = config_get_path('snmpd/syslocation');
 $pconfig['syscontact'] = config_get_path('snmpd/syscontact');
 $pconfig['rocommunity'] = config_get_path('snmpd/rocommunity');
-/* disabled until some docs show up on what this does.
-$pconfig['rwenable'] = isset($config['snmpd']['rwenable']);
-$pconfig['rwcommunity'] = $config['snmpd']['rwcommunity'];
-*/
 $pconfig['trapenable'] = config_path_enabled('snmpd', 'trapenable');
 $pconfig['trapserver'] = config_get_path('snmpd/trapserver');
 $pconfig['trapserverport'] = config_get_path('snmpd/trapserverport');
@@ -87,55 +83,49 @@ if ($_POST) {
 	$pconfig = $_POST;
 
 	/* input validation */
+	$reqdfields = [];
+	$reqdfieldsn = [];
 	if ($_POST['enable']) {
-		if (strstr($_POST['syslocation'], "#")) {
-			$input_errors[] = gettext("Invalid character '#' in system location");
+		if (!is_port($_POST['pollport'], false)) {
+			$input_errors[] = gettext("Invalid Polling Port");
 		}
-		if (strstr($_POST['syscontact'], "#")) {
-			$input_errors[] = gettext("Invalid character '#' in system contact");
+		$reqdfields[] = "pollport";
+		$reqdfieldsn[] = gettext("Polling Port");
+
+		if (preg_match('(#|\$|"|\r|\n)', $_POST['syslocation']) === 1) {
+			$input_errors[] = gettext("Invalid System Location");
 		}
-		if (strstr($_POST['rocommunity'], "#")) {
-			$input_errors[] = gettext("Invalid character '#' in read community string");
+		if (preg_match('(#|\$|"|\r|\n)', $_POST['syscontact']) === 1) {
+			$input_errors[] = gettext("Invalid System Contact");
+		}
+		if (preg_match('(#|\$|"|\r|\n)', $_POST['rocommunity']) === 1) {
+			$input_errors[] = gettext("Invalid Read Community String");
 		}
 
-		$reqdfields = explode(" ", "rocommunity");
-		$reqdfieldsn = array(gettext("Community"));
-		do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
-
-		$reqdfields = explode(" ", "pollport");
-		$reqdfieldsn = array(gettext("Polling Port"));
-		do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
-
-
+		$reqdfields[] = "rocommunity";
+		$reqdfieldsn[] = gettext("Read Community String");
 	}
-
 	if ($_POST['trapenable']) {
-		if (strstr($_POST['trapstring'], "#")) {
-			$input_errors[] = gettext("Invalid character '#' in SNMP trap string");
+		if (!is_hostname($_POST['trapserver']) &&
+		    !is_ipaddr($_POST['trapserver'])) {
+			$input_errors[] = gettext("Invalid Trap Server");
 		}
+		$reqdfields[] = "trapserver";
+		$reqdfieldsn[] = gettext("Trap Server");
 
-		$reqdfields = explode(" ", "trapserver");
-		$reqdfieldsn = array(gettext("Trap server"));
-		do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
+		if (!is_port($_POST['trapserverport'], false)) {
+			$input_errors[] = gettext("Invalid Trap Server Port");
+		}
+		$reqdfields[] = "trapserverport";
+		$reqdfieldsn[] = gettext("Trap Server Port");
 
-		$reqdfields = explode(" ", "trapserverport");
-		$reqdfieldsn = array(gettext("Trap server port"));
-		do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
-
-		$reqdfields = explode(" ", "trapstring");
-		$reqdfieldsn = array(gettext("Trap string"));
-		do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
+		if (preg_match('(#|\$|"|\r|\n)', $_POST['trapstring']) === 1) {
+			$input_errors[] = gettext("Invalid SNMP Trap String");
+		}
+		$reqdfields[] = "trapstring";
+		$reqdfieldsn[] = gettext("SNMP Trap String");
 	}
-
-/* disabled until some docs show up on what this does.
-	if ($_POST['rwenable']) {
-		$reqdfields = explode(" ", "rwcommunity");
-		$reqdfieldsn = explode(",", "Write community string");
-		do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
-	}
-*/
-
-
+	do_input_validation($_POST, $reqdfields, $reqdfieldsn, $input_errors);
 
 	if (!$input_errors) {
 		config_set_path('snmpd/enable', $_POST['enable'] ? true : false);
@@ -143,10 +133,6 @@ if ($_POST) {
 		config_set_path('snmpd/syslocation', $_POST['syslocation']);
 		config_set_path('snmpd/syscontact', $_POST['syscontact']);
 		config_set_path('snmpd/rocommunity', $_POST['rocommunity']);
-		/* disabled until some docs show up on what this does.
-		$config['snmpd']['rwenable'] = $_POST['rwenable'] ? true : false;
-		$config['snmpd']['rwcommunity'] = $_POST['rwcommunity'];
-		*/
 		config_set_path('snmpd/trapenable', $_POST['trapenable'] ? true : false);
 		config_set_path('snmpd/trapserver', $_POST['trapserver']);
 		config_set_path('snmpd/trapserverport', $_POST['trapserverport']);
@@ -276,7 +262,7 @@ if ($pconfig['trapenable']) {
 
 $section->addInput(new Form_Input(
 	'trapserver',
-	'Trap server',
+	'Trap Server',
 	'text',
 	$pconfig['trapserver']
 ))->setHelp('Enter the trap server name');

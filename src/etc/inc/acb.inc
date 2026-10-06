@@ -214,6 +214,7 @@ function acb_query_service($endpoint, $post_fields, $multipart = false) {
 	curl_setopt($curl_session, CURLOPT_CONNECTTIMEOUT, 55);
 	curl_setopt($curl_session, CURLOPT_TIMEOUT, 30);
 	curl_setopt($curl_session, CURLOPT_USERAGENT, g_get('product_label') . '/' . rtrim(file_get_contents("/etc/version")));
+	curl_setopt($curl_session, CURLOPT_FORBID_REUSE, true);
 	// Proxy
 	set_curlproxy($curl_session);
 
@@ -228,8 +229,6 @@ function acb_query_service($endpoint, $post_fields, $multipart = false) {
 		fwrite($fd, $data);
 		fwrite($fd, curl_error($curl_session));
 		fclose($fd);
-	} else {
-		curl_close($curl_session);
 	}
 	return [$data, $httpcode, $errno];
 }

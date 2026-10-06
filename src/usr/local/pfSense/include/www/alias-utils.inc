@@ -53,7 +53,7 @@ $singular_types = array(
 	'urltable_ports' => gettext("URL Table (Port)"),
 );
 
-function deleteAlias($id, $apply = false) {
+function deleteAlias($id, $apply = false, $force = false) {
 	/* make sure rule is not being referenced by any nat or filter rules */
 	$delete_error = "";
 	if (!is_numericint($id)) {
@@ -62,6 +62,12 @@ function deleteAlias($id, $apply = false) {
 	$is_alias_referenced = false;
 	$referenced_by = array();
 	$alias = config_get_path("aliases/alias/{$id}");
+
+	if (!empty($alias) && !$force && is_alias_managed($alias)) {
+		$delete_error = gettext("This alias is automatically managed.");
+		return $delete_error;
+	}
+
 	$section_fields = [
 		// Firewall rules
 		'filter/rule' => [
@@ -290,7 +296,7 @@ function alias_same_type($name, $type) {
 	return true;
 }
 
-function saveAlias($post, $id) {
+function saveAlias($post, $id, $force = false) {
 	global $g, $pconfig, $aliastable, $singular_types;
 
 	$origname = $post['origname'];
@@ -311,9 +317,17 @@ function saveAlias($post, $id) {
 		$data_errors[] = invalidaliasnamemsg($post['name']);
 	}
 
+	$is_new_rule = empty(config_get_path('aliases/alias/' . $id));
+
+	/* check for managed alias */
+	if (!$is_new_rule && !$force && is_alias_managed($post)) {
+		$data_errors[] = gettext("This alias is automatically managed.");
+	}
+
 	/* check for name conflicts */
 	foreach (config_get_path('aliases/alias', []) as $key => $alias) {
-		if (($alias['name'] == $post['name']) && (empty(config_get_path('aliases/alias/' . $id)) || ($key != $id))) {
+		$is_different_rule_from_post = ($key != $id);
+		if (($alias['name'] == $post['name']) && ($is_new_rule || $is_different_rule_from_post)) {
 			$data_errors[] = gettext("An alias with this name already exists.");
 			break;
 		}
@@ -370,6 +384,16 @@ function saveAlias($post, $id) {
 	$final_address_details = array();
 	$alias['name'] = $post['name'];
 	$alias['type'] = $post['type'];
+
+	/* Check for alias tags. */
+	if (isset($post['tags']) && is_string($post['tags']) && (strlen($post['tags']) > 0)) {
+		$tags = implode(ALIAS_TAG_DELIMITER, get_tags_from_alias_item($post));
+		if ($post['tags'] != $tags) {
+			$data_errors[] = localize_text('Invalid alias tag(s)%s', ': ' . htmlspecialchars($post['tags']));
+		} else {
+			$alias['tags'] = $tags;
+		}
+	}
 
 	if (preg_match("/urltable/i", $post['type'])) {
 		$address = array();

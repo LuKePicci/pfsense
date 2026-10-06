@@ -1136,7 +1136,7 @@ events.push(function() {
 						$('#provider').append(new Option(value, value));
 					}
 				}
-				$("#provider").val("<?=$pconfig['provider'];?>");
+				$("#provider").val(<?=json_encode(htmlspecialchars($pconfig['provider']));?>);
 				// select option simulates the provider to populate the Plan
 				$("#provider").trigger("change");
 			}
@@ -1161,7 +1161,7 @@ events.push(function() {
 											  providerplan[1]));
 					}
 				}
-				$("#providerplan").val("<?=$pconfig['providerplan'];?>");
+				$("#providerplan").val(<?=json_encode(htmlspecialchars($pconfig['providerplan']));?>);
 			}
 		});
 	}
@@ -1235,11 +1235,11 @@ events.push(function() {
 	hideClass('linkparam', true);
 
 	hideProviders($('#type').val() != "ppp");
-	if ($('provider').size() == 0) {
+	if ($('provider').length == 0) {
 		hideInput('provider', true);
 	}
 
-	if ($('providerplan').size() == 0) {
+	if ($('providerplan').length == 0) {
 		hideInput('providerplan', true);
 	}
 

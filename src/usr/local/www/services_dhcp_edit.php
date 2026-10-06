@@ -40,6 +40,12 @@ $dnsregpolicy_values = [
 	'disable' => gettext('Disable')
 ];
 
+$customitemtypes = array(
+	'text' => gettext('Text'), 'string' => gettext('String'), 'boolean' => gettext('Boolean'),
+	'unsigned integer 8' => gettext('Unsigned 8-bit integer'), 'unsigned integer 16' => gettext('Unsigned 16-bit integer'), 'unsigned integer 32' => gettext('Unsigned 32-bit integer'),
+	'signed integer 8' => gettext('Signed 8-bit integer'), 'signed integer 16' => gettext('Signed 16-bit integer'), 'signed integer 32' => gettext('Signed 32-bit integer'), 'ip-address' => gettext('IP address or host')
+);
+
 function staticmapcmp($a, $b) {
 	return ipcmp($a['ipaddr'], $b['ipaddr']);
 }
@@ -349,9 +355,34 @@ if ($_POST['save']) {
 	if ($_POST['tftp'] && !is_ipaddrv4($_POST['tftp']) && !is_domain($_POST['tftp']) && !filter_var($_POST['tftp'], FILTER_VALIDATE_URL)) {
 		$input_errors[] = gettext("A valid IPv4 address, hostname or URL must be specified for the TFTP server.");
 	}
-	if (($_POST['nextserver'] && !is_ipaddrv4($_POST['nextserver']))) {
-		$input_errors[] = gettext("A valid IPv4 address must be specified for the network boot server.");
+
+	/* Validate Network Booting */
+	if (($_POST['nextserver'] &&
+	    !is_ipaddrv4($_POST['nextserver']))) {
+		$input_errors[] = gettext("A valid IP address must be specified for the network boot server.");
 	}
+	if (preg_match('("|;|}|{|\r|\n)', $_POST['filename']) === 1) {
+		$input_errors[] = gettext("Invalid Default BIOS File Name.");
+	}
+	if (preg_match('("|;|}|{|\r|\n)', $_POST['filename32']) === 1) {
+		$input_errors[] = gettext("Invalid UEFI 32 bit File Name.");
+	}
+	if (preg_match('("|;|}|{|\r|\n)', $_POST['filename64']) === 1) {
+		$input_errors[] = gettext("Invalid UEFI 64 bit File Name.");
+	}
+	if (preg_match('("|;|}|{|\r|\n)', $_POST['filename32arm']) === 1) {
+		$input_errors[] = gettext("Invalid ARM 32 bit File Name.");
+	}
+	if (preg_match('("|;|}|{|\r|\n)', $_POST['filename64arm']) === 1) {
+		$input_errors[] = gettext("Invalid ARM 64 bit File Name.");
+	}
+	if (preg_match('("|;|}|{|\r|\n)', $_POST['uefihttpboot']) === 1) {
+		$input_errors[] = gettext("Invalid UEFI HTTPBoot URL.");
+	}
+	if (preg_match('("|;|}|{|\r|\n)', $_POST['rootpath']) === 1) {
+		$input_errors[] = gettext("Invalid Root Path.");
+	}
+
 	if (isset($_POST['arp_table_static_entry']) && empty($_POST['mac'])) {
 		$input_errors[] = gettext("A valid MAC address must be specified for use with static ARP.");
 	}
@@ -362,6 +393,9 @@ if ($_POST['save']) {
 	/* Redmine #13584 */
 	if (is_array($pconfig['numberoptions']['item'])) {
 		foreach ($pconfig['numberoptions']['item'] as $numberoption) {
+			if (!array_key_exists($numberoption['type'], $customitemtypes)) {
+				$input_errors[] = gettext("Invalid custom option type.");
+			}
 			$numberoption_value = base64_decode($numberoption['value']);
 			if ($numberoption['type'] == 'text' && strstr($numberoption_value, '"')) {
 				$input_errors[] = gettext("Text type cannot include quotation marks.");
@@ -389,11 +423,20 @@ if ($_POST['save']) {
 
 	/* validate custom config */
 	if (dhcp_is_backend('kea')) {
-		if (!empty($_POST['custom_kea_config'])) {
-			$json = json_decode($_POST['custom_kea_config'], true);
-			if (!is_array($json) || (json_last_error() !== JSON_ERROR_NONE)) {
-				$input_errors[] = gettext('Custom configuration is not a well formed JSON object.');
+		if (dhcp_can_edit_custom_config()) {
+			if (!empty($_POST['custom_kea_config'])) {
+				$json = json_decode($_POST['custom_kea_config'], true);
+				if (!is_array($json) || (json_last_error() !== JSON_ERROR_NONE)) {
+					$input_errors[] = gettext('Custom configuration is not a well formed JSON object.');
+				}
 			}
+		} else {
+			$stored_custom = is_array($this_map_config) ? base64_decode(array_get_path($this_map_config, 'custom_kea_config', '')) : '';
+			if (isset($_POST['custom_kea_config']) && ($_POST['custom_kea_config'] !== $stored_custom)) {
+				$input_errors[] = gettext('This user does not have sufficient privileges to edit the Custom Configuration field.');
+			}
+			/* show the stored value, not the submitted one */
+			$pconfig['custom_kea_config'] = $stored_custom;
 		}
 	}
 
@@ -469,7 +512,12 @@ if ($_POST['save']) {
 		$mapent['numberoptions'] = $pconfig['numberoptions'];
 
 		if (dhcp_is_backend('kea')) {
-			$mapent['custom_kea_config'] = base64_encode($_POST['custom_kea_config']);
+			if (dhcp_can_edit_custom_config()) {
+				$mapent['custom_kea_config'] = base64_encode($_POST['custom_kea_config']);
+			} elseif (!empty($this_map_config['custom_kea_config'])) {
+				/* preserve stored value */
+				$mapent['custom_kea_config'] = $this_map_config['custom_kea_config'];
+			}
 		}
 
 		if ($this_map_config) {
@@ -496,6 +544,22 @@ if ($_POST['save']) {
 			mwexec("/usr/sbin/arp -S " . escapeshellarg($mapent['ipaddr']) . " " . escapeshellarg($mapent['mac']) . " >/dev/null", true);
 		} else {
 			mwexec("/usr/sbin/arp -d " . escapeshellarg($mapent['ipaddr']) . " >/dev/null", true);
+		}
+
+		if (dhcp_is_backend('kea') && ($this_map_config['mac'] != $mapent['mac'])) {
+			/* Remove the lease for the old mapping. Do this on edit to
+			 * avoid leaving stray leases on the lease file; e.g. if the
+			 * system is rebooted before changes are applied. */
+			if (!function_exists('system_del_kea4lease')) {
+				require_once('system.inc');
+			}
+			if (is_ipaddrv4($this_map_config['ipaddr'])) {
+				system_del_kea4lease($this_map_config['ipaddr']);
+			} elseif (!empty($this_map_config['mac'])) {
+				system_del_kea4lease($this_map_config['mac'], get_keasubnetid_from_interface($if));
+			} elseif (isset($this_map_config['cid']) && (strlen($this_map_config['cid']) > 0)) {
+				system_del_kea4lease($this_map_config['cid'], get_keasubnetid_from_interface($if));
+			}
 		}
 
 		header("Location: services_dhcp.php?if={$if}");
@@ -998,12 +1062,6 @@ if (!$pconfig['numberoptions']) {
 	$pconfig['numberoptions']['item']  = array(array('number' => '', 'type' => 'text', 'value' => ''));
 }
 
-$customitemtypes = array(
-	'text' => gettext('Text'), 'string' => gettext('String'), 'boolean' => gettext('Boolean'),
-	'unsigned integer 8' => gettext('Unsigned 8-bit integer'), 'unsigned integer 16' => gettext('Unsigned 16-bit integer'), 'unsigned integer 32' => gettext('Unsigned 32-bit integer'),
-	'signed integer 8' => gettext('Signed 8-bit integer'), 'signed integer 16' => gettext('Signed 16-bit integer'), 'signed integer 32' => gettext('Signed 32-bit integer'), 'ip-address' => gettext('IP address or host')
-);
-
 $numrows = count($item) -1;
 $counter = 0;
 
@@ -1068,11 +1126,15 @@ $form->add($section);
 
 if (dhcp_is_backend('kea')):
 $section = new Form_Section(gettext('Custom Configuration'));
-$section->addInput(new Form_Textarea(
+$custom_config = new Form_Textarea(
 	'custom_kea_config',
 	gettext('JSON Configuration'),
 	array_get_path($pconfig, 'custom_kea_config')
-))->setWidth(8)->setHelp(gettext('JSON to be merged into the "%1$s" section of the generated Kea DHCPv4 configuration.%2$sThe input must be a well formed JSON object and should not include the "%1$s" key itself.'), 'reservation', '<br/>');
+);
+if (!dhcp_can_edit_custom_config()) {
+	$custom_config->setDisabled();
+}
+$section->addInput($custom_config)->setWidth(8)->setHelp(gettext('JSON to be merged into the "%1$s" section of the generated Kea DHCPv4 configuration.%2$sThe input must be a well formed JSON object and should not include the "%1$s" key itself.'), 'reservation', '<br/>');
 $form->add($section);
 endif;
 
@@ -1312,7 +1374,7 @@ events.push(function() {
 			text = "<?=gettext('Display Advanced');?>";
 		}
 		var children = $('#btnadvnwkboot').children();
-		$('#btnadvnwkboot').text(text).prepend(children);	
+		$('#btnadvnwkboot').text(text).prepend(children);
 	}
 
 	$('#btnadvnwkboot').click(function(event) {

@@ -39,7 +39,7 @@ echo "Removing package \"{$pkg_name}\"... ";
 if (is_vital_system_default_package($args[1])) {
 	echo "Cannot remove vital package.\n";
 	return false;
-} elseif (mwexec("/usr/local/sbin/{$g['product_name']}-upgrade -y -r {$g['pkg_prefix']}{$pkg_name}") == 0) {
+} elseif (mwexec("/usr/local/sbin/{$g['product_name']}-upgrade -y -r {$g['pkg_prefix']}{$pkg_name}", LOG_ERR) == 0) {
 	echo "Done.\n";
 	return true;
 } else {

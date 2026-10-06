@@ -263,10 +263,10 @@ if (!function_exists('get_dyndns_service_text')) {
 ?>
 							<td><?=htmlspecialchars(get_dyndns_service_text($dyndns['descr']));?></td>
 							<?php else:?>
-							<td><?=get_dyndns_service_text($dyndns['type'])?></td>
+							<td><?=htmlspecialchars(get_dyndns_service_text($dyndns['type']))?></td>
 							<?php endif;?>
-							<td><?=get_dyndns_hostname_text($dyndns)?></td>
-							<td class="col-sm-2"><input id="show[]" name ="show[]" value="<?=get_dyndnsent_key($dyndns)?>" type="checkbox" <?=(!in_array(get_dyndnsent_key($dyndns), $skipdyndns) ? 'checked':'')?>></td>
+							<td><?=htmlspecialchars(get_dyndns_hostname_text($dyndns))?></td>
+							<td class="col-sm-2"><input id="show[]" name ="show[]" value="<?=htmlspecialchars(get_dyndnsent_key($dyndns))?>" type="checkbox" <?=(!in_array(get_dyndnsent_key($dyndns), $skipdyndns) ? 'checked':'')?>></td>
 						</tr>
 <?php
 				endforeach;

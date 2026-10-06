@@ -893,7 +893,55 @@ function system_clear_all_kea4leases() {
 	socket_close($fd);
 }
 
-function system_del_kea4lease(string $ip) {
+/**
+ * Returns the Kea subnet ID for given an interface identity.
+ * @param string $interface The interface identity, e.g. opt1.
+ * @param int $address_family IP address family, AF_INET or AF_INET6.
+ * @return string|null The subnet ID, or null if none found.
+ */
+function get_keasubnetid_from_interface(string $interface, int $address_family = AF_INET): string|null {
+	$subnet_id = null;
+	$path = ($address_family == AF_INET) ? 'dhcpd' : 'dhcpdv6';
+	foreach (array_keys(config_get_path($path, [])) as $idx => $if) {
+		if ($if == $interface) {
+			$subnet_id = $idx + 1;
+			break;
+		}
+	}
+	return strval($subnet_id);
+}
+
+/**
+ * Deletes a single IPv4 lease from Kea.
+ * @param string $lease IP address, MAC address, or client ID.
+ * @param string|null $subnet_id The subnet ID for the lease.
+ * 		Only required when $lease is a MAC address or client ID.
+ * @return void
+ */
+function system_del_kea4lease(string $lease, string|null $subnet_id = null) {
+	if (strlen($lease) < 1) {
+		return;
+	}
+	if (is_ipaddrv4($lease)) {
+		$cmdjson = json_encode([
+			'command' => 'lease4-del',
+			'arguments' => [
+				'ip-address' => $lease
+			]
+		]);
+	} elseif (is_numericint($subnet_id)) {
+		$cmdjson = json_encode([
+			'command' => 'lease4-del',
+			'arguments' => [
+				'identifier' => $lease,
+				'identifier-type' => is_macaddr($lease) ? 'hw-address' : 'client-id',
+				'subnet-id' => intval($subnet_id)
+			]
+		]);
+	} else {
+		return;
+	}
+
 	$socket_path = g_get('varrun_path') . '/kea/kea4-ctrl-socket';
 	$rbuf = NULL;
 
@@ -910,13 +958,6 @@ function system_del_kea4lease(string $ip) {
 		socket_close($fd);
 		return;
 	}
-
-	$cmdjson = json_encode([
-		'command' => 'lease4-del',
-		'arguments' => [
-			'ip-address' => $ip
-		]
-	]);
 
 	socket_send($fd, $cmdjson, strlen($cmdjson), 0);
 
@@ -954,7 +995,40 @@ function system_clear_all_kea6leases() {
 	socket_close($fd);
 }
 
-function system_del_kea6lease(string $ip, string $type = 'IA_NA') {
+/**
+ * Deletes a single IPv6 lease from Kea.
+ * @param string $lease IPv6 address or client DUID.
+ * @param string $type Lease type, e.g. "IA_NA" or "IA_PD".
+ * 		Only required when $lease is an IP address.
+ * @param string|null $subnet_id The subnet ID for the lease.
+ * 		Only required when $lease is the client DUID.
+ * @return void
+ */
+function system_del_kea6lease(string $lease, string $type = 'IA_NA', string|null $subnet_id = null) {
+	if (strlen($lease) < 1) {
+		return;
+	}
+	if (is_ipaddrv6($lease)) {
+		$cmdjson = json_encode([
+			'command' => 'lease6-del',
+			'arguments' => [
+				'ip-address' => $lease,
+				'type' => $type
+			]
+		]);
+	} elseif (is_numericint($subnet_id)) {
+		$cmdjson = json_encode([
+			'command' => 'lease6-del',
+			'arguments' => [
+				'identifier' => $lease,
+				'identifier-type' => 'duid',
+				'subnet-id' => intval($subnet_id)
+			]
+		]);
+	} else {
+		return;
+	}
+
 	$socket_path = g_get('varrun_path') . '/kea/kea6-ctrl-socket';
 	$rbuf = NULL;
 
@@ -971,16 +1045,6 @@ function system_del_kea6lease(string $ip, string $type = 'IA_NA') {
 		socket_close($fd);
 		return;
 	}
-
-	$ip_parts = explode('/', trim($ip));
-
-	$cmdjson = json_encode([
-		'command' => 'lease6-del',
-		'arguments' => [
-			'ip-address' => $ip_parts[0],
-			'type' => $type
-		]
-	]);
 
 	socket_send($fd, $cmdjson, strlen($cmdjson), 0);
 
@@ -1953,7 +2017,7 @@ function system_webgui_start() {
 	@unlink("{$g['varrun_path']}/nginx-webConfigurator.pid");
 
 	/* start nginx */
-	$res = mwexec("/usr/local/sbin/nginx -c {$g['varetc_path']}/nginx-webConfigurator.conf");
+	$res = mwexec("/usr/local/sbin/nginx -c {$g['varetc_path']}/nginx-webConfigurator.conf", LOG_ERR);
 
 	if (is_platform_booting()) {
 		if ($res == 0) {

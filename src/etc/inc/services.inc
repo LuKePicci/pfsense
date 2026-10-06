@@ -75,9 +75,15 @@ function services_radvd_configure($blacklist = array()) {
 
 		$racarpif = false;
 		$rasrcaddr = "";
-		/* check if binding to CARP IP */
 		if (!empty($dhcpv6ifconf['rainterface']) && strstr($dhcpv6ifconf['rainterface'], "_vip")) {
-			if (get_carp_interface_status($dhcpv6ifconf['rainterface']) == "MASTER") {
+			/* check if binding to CARP IP */
+			$carpstatus = get_carp_interface_status($dhcpv6ifconf['rainterface']);
+			if ($carpstatus == "") {
+				$rasrcaddr = get_configured_vip_ipv6($dhcpv6ifconf['rainterface']);
+				if (!is_linklocal($rasrcaddr)) {
+					$rasrcaddr = "";
+				}
+			} elseif ($carpstatus == "MASTER") {
 				if (is_linklocal(get_configured_vip_ipv6($dhcpv6ifconf['rainterface']))) {
 					$rasrcaddr = get_configured_vip_ipv6($dhcpv6ifconf['rainterface']);
 				} else {
@@ -361,7 +367,7 @@ function services_radvd_configure($blacklist = array()) {
 		if (!config_path_enabled("interfaces/{$if}")) {
 			continue;
 		}
-		if (config_get_path("dhcpdv6/{$if}/ramode") == "disabled") {
+		if (config_get_path("dhcpdv6/{$if}/ramode", "disabled") == "disabled") {
 			continue;
 		}
 		/* Do not put in the config an interface which is down */
@@ -599,13 +605,21 @@ function services_kea6_configure(bool $with_custom = true) {
 			'persist' => true,
 			'name' => $kea_lease_db
 		],
-		'loggers' => [[
-			'name' => 'kea-dhcp6',
-			'output_options' => [[
-				'output' => 'syslog'
-			]],
-			'severity' => config_get_path('kea6/loglevel', 'WARN')
-		]],
+		'loggers' => [
+			[
+				'name' => 'kea-dhcp6',
+				'output_options' => [[
+					'output' => 'syslog'
+				]],
+				'severity' => config_get_path('kea6/loglevel', 'ERROR')
+			], [
+				'name' => 'kea-dhcp6.leases',
+				'output_options' => [[
+					'output' => 'syslog'
+				]],
+				'severity' => config_get_path('kea6/loglevel_leases', 'INFO')
+			]
+		],
 		'valid-lifetime' => 7200,
 		'max-valid-lifetime' => 86400,
 		'host-reservation-identifiers' => [ /* order of priority */
@@ -779,15 +793,19 @@ case "$1" in
 esac
 EOD;
 
-	/* Compute hash of script file */
-	$run_script_hash = '';
-	if (file_exists($run_script_path)) {
-		$run_script_hash = hash_file('xxh3', $run_script_path);
-	}
-	/* Only need to (re)write script on-disk if it has changed */
-	if (!hash_equals($run_script_hash, hash('xxh3', $run_script))) {
-		file_put_contents($run_script_path, $run_script);
-		chmod($run_script_path, 0755);
+	if (config_path_enabled('unbound')) {
+		/* Compute hash of script file */
+		$run_script_hash = '';
+		if (file_exists($run_script_path)) {
+			$run_script_hash = hash_file('xxh3', $run_script_path);
+		}
+		/* Only need to (re)write script on-disk if it has changed */
+		if (!hash_equals($run_script_hash, hash('xxh3', $run_script))) {
+			file_put_contents($run_script_path, $run_script);
+			chmod($run_script_path, 0755);
+		}
+	} else {
+		unlink_if_exists($run_script_path);
 	}
 
 	// Install kea2fib6 hook
@@ -1261,7 +1279,7 @@ kea6_skip_first_pool_options:
 		$retval = mwexec(implode(' ', [
 			$kea_bin,
 			'-t', $keaconf_path
-		]));
+		]), LOG_ERR);
 		if ($retval <> 0) {
 			/* Try again without any custom configuration */
 			file_notice('DHCP', gettext('Failed to start DHCPv6 Server with custom configurations. See Status > System Logs for more information about this failure.'));
@@ -1422,13 +1440,21 @@ function services_kea4_configure(bool $with_custom = true) {
 			'persist' => true,
 			'name' => $kea_lease_db
 		],
-		'loggers' => [[
-			'name' => 'kea-dhcp4',
-			'output_options' => [[
-				'output' => 'syslog'
-			]],
-			'severity' => config_get_path('kea/loglevel', 'WARN')
-		]],
+		'loggers' => [
+			[
+				'name' => 'kea-dhcp4',
+				'output_options' => [[
+					'output' => 'syslog'
+				]],
+				'severity' => config_get_path('kea/loglevel', 'ERROR')
+			], [
+				'name' => 'kea-dhcp4.leases',
+				'output_options' => [[
+					'output' => 'syslog'
+				]],
+				'severity' => config_get_path('kea/loglevel_leases', 'INFO')
+			]
+		],
 		'valid-lifetime' => 7200,
 		'max-valid-lifetime' => 86400,
 		'ip-reservations-unique' => false,
@@ -1600,15 +1626,19 @@ case "$1" in
 esac
 EOD;
 
-	/* Compute hash of script file */
-	$run_script_hash = null;
-	if (file_exists($run_script_path)) {
-		$run_script_hash = hash_file('xxh3', $run_script_path);
-	}
-	/* Only need to (re)write script on-disk if it has changed */
-	if (hash('xxh3', $run_script) !== $run_script_hash) {
-		file_put_contents($run_script_path, $run_script);
-		chmod($run_script_path, 0755);
+	if (config_path_enabled('unbound')) {
+		/* Compute hash of script file */
+		$run_script_hash = null;
+		if (file_exists($run_script_path)) {
+			$run_script_hash = hash_file('xxh3', $run_script_path);
+		}
+		/* Only need to (re)write script on-disk if it has changed */
+		if (hash('xxh3', $run_script) !== $run_script_hash) {
+			file_put_contents($run_script_path, $run_script);
+			chmod($run_script_path, 0755);
+		}
+	} else {
+		unlink_if_exists($run_script_path);
 	}
 
 	$run_script_main = '/usr/local/share/kea/scripts/kea_run4';
@@ -2599,7 +2629,7 @@ EOD;
 		$retval = mwexec(implode(' ', [
 			$kea_bin,
 			'-t', $keaconf_path
-		]));
+		]), LOG_ERR);
 		if ($retval <> 0) {
 			/* Try again without any custom configuration */
 			file_notice('DHCP', gettext('Failed to start DHCP Server with custom configurations. See Status > System Logs for more information about this failure.'));
@@ -4735,11 +4765,11 @@ function dyndnsCheckIP($interface, string|null $mode = null, int|null $address_f
 	curl_setopt($ip_ch, CURLOPT_IPRESOLVE, ($use_ipv6 ? CURL_IPRESOLVE_V6 : CURL_IPRESOLVE_V4));
 	curl_setopt($ip_ch, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
 	curl_setopt($ip_ch, CURLOPT_USERPWD, "{$username}:{$password}");
+	curl_setopt($ip_ch, CURLOPT_FORBID_REUSE, true);
 	if ($curl_proxy) {
 		set_curlproxy($ip_ch);
 	}
 	$ip_result_page = curl_exec($ip_ch);
-	curl_close($ip_ch);
 	$matches = [];
 	preg_match($response_pattern, $ip_result_page, $matches);
 	if (isset($matches[1]) && is_ipaddr($matches[1])) {
@@ -5363,6 +5393,7 @@ function services_dnsupdate_process($int = "", $updatehost = "", $forced = false
 		    !isset($dnsupdate['enable'])) {
 			continue;
 		}
+		$error = null;
 		/*
 		 * If it's using a gateway group, check if interface is
 		 * the active gateway for that group
@@ -5407,10 +5438,22 @@ function services_dnsupdate_process($int = "", $updatehost = "", $forced = false
 			list($wanip, $error) = get_request_source_address($dnsupdate['interface'], AF_INET);
 			$bindipv4 = $wanip;
 		}
+		if (isset($error) && ($dnsupdate['recordtype'] != "AAAA")) {
+			logger(LOG_ERR, localize_text(
+				'(%1$s) Could not determine the request IPv4 address: %2$s',
+				$dnsupdate['host'], $error), LOG_PREFIX_DDNS
+			);
+		}
 		if (is_stf_interface($dnsupdate['interface'])) {
 			$wanipv6 = get_interface_ipv6($dnsupdate['interface'] . '_stf');
 		} else {
 			list($wanipv6, $error) = get_request_source_address($dnsupdate['interface'], AF_INET6);
+			if (isset($error) && ($dnsupdate['recordtype'] != "A")) {
+				logger(LOG_ERR, localize_text(
+					'(%1$s) Could not determine the request IPv6 address: %2$s',
+					$dnsupdate['host'], $error), LOG_PREFIX_DDNS
+				);
+			}
 		}
 		$bindipv6 = $wanipv6;
 
@@ -5422,10 +5465,22 @@ function services_dnsupdate_process($int = "", $updatehost = "", $forced = false
 		} elseif (!empty($dnsupdate['updatesource'])) {
 			/* Find the alternate binding address */
 			list($bindipv4, $error) = get_request_source_address($dnsupdate['updatesource'], AF_INET);
+			if (isset($error) && ($dnsupdate['recordtype'] != "AAAA")) {
+				logger(LOG_ERR, localize_text(
+					'(%1$s) Could not determine the update source IPv4 address: %2$s',
+					$dnsupdate['host'], $error), LOG_PREFIX_DDNS
+				);
+			}
 			if (is_stf_interface($dnsupdate['interface'])) {
 				$bindipv6 = get_interface_ipv6($dnsupdate['updatesource'] . '_stf');
 			} else {
 				list($bindipv6, $error) = get_request_source_address($dnsupdate['updatesource'], AF_INET6);
+				if (isset($error) && ($dnsupdate['recordtype'] != "A")) {
+					logger(LOG_ERR, localize_text(
+						'(%1$s) Could not determine the update source IPv6 address: %2$s',
+						$dnsupdate['host'], $error), LOG_PREFIX_DDNS
+					);
+				}
 			}
 		}
 
@@ -5572,7 +5627,7 @@ EOD;
 
 		$cmd .= " {$g['varetc_path']}/nsupdatecmds{$i}";
 
-		if (mwexec($cmd) == 0) {
+		if (mwexec($cmd, LOG_ERR) == 0) {
 			$if = get_real_interface($dnsupdate['interface']);
 			if (!empty($cacheFile)) {
 				@file_put_contents($cacheFile,
